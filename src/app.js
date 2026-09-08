@@ -1,7 +1,13 @@
 import { CATEGORY_KEYS, CATEGORY_LABELS, categoryLabel } from "./core/categories.js";
 import { createNote, filterNotes, sortNotes, updateNote } from "./core/notes.js";
 import { listForRange, summarizeItems } from "./core/stats.js";
-import { loadRepository } from "./core/storage.js";
+import {
+  DEFAULT_SETTINGS,
+  loadRepository,
+  readSettings,
+  writeSettings,
+} from "./core/storage.js";
+import { formatLocalDateTime, toDateKey } from "./core/time.js";
 import {
   createTodo,
   purgeOverdueTodos,
@@ -10,7 +16,9 @@ import {
   updateTodo,
 } from "./core/todos.js";
 
-const repository = loadRepository(window.localStorage);
+const storageBackend = window.localStorage;
+const repository = loadRepository(storageBackend);
+let appSettings = readSettings(storageBackend);
 
 const initialQuery = new URLSearchParams(window.location.search);
 const state = {
@@ -20,14 +28,20 @@ const state = {
   noteCategory: ["all", ...CATEGORY_KEYS].includes(initialQuery.get("category"))
     ? initialQuery.get("category")
     : "all",
-  selectedNoteId: null,
-  todoEditingId: null,
+  editor: null,
+  returnView: { view: "notes", noteCategory: "all" },
   mineSection: ["creations", "settings"].includes(initialQuery.get("section"))
     ? initialQuery.get("section")
     : "creations",
   range: ["month", "all"].includes(initialQuery.get("range"))
     ? initialQuery.get("range")
     : "month",
+};
+
+const VIEW_NAMES = {
+  notes: "笔记",
+  todos: "待办",
+  mine: "我的",
 };
 
 const pageTitle = document.querySelector("#page-title");
@@ -40,12 +54,6 @@ const confirmDetail = document.querySelector("#confirm-detail");
 const confirmAction = document.querySelector("#confirm-action");
 let pendingConfirm = null;
 let toastTimer = null;
-
-const VIEW_NAMES = {
-  notes: "笔记",
-  todos: "待办",
-  mine: "我的",
-};
 
 function escapeHtml(value) {
   return String(value).replace(
@@ -65,13 +73,22 @@ function escapeAttribute(value) {
   return escapeHtml(value);
 }
 
-function noteFromState() {
-  if (!state.selectedNoteId) {
+function noteFromEditor() {
+  if (!state.editor || state.editor.kind !== "note" || !state.editor.id) {
     return null;
   }
   return repository
     .items()
-    .find((item) => item.id === state.selectedNoteId && item.kind === "note") ?? null;
+    .find((item) => item.id === state.editor.id && item.kind === "note") ?? null;
+}
+
+function todoFromEditor() {
+  if (!state.editor || state.editor.kind !== "todo" || !state.editor.id) {
+    return null;
+  }
+  return repository
+    .items()
+    .find((item) => item.id === state.editor.id && item.kind === "todo") ?? null;
 }
 
 function activeNotes() {
@@ -89,225 +106,125 @@ function allNoteCounts() {
   };
 }
 
-function noteFormMarkup(note) {
-  const isEditing = Boolean(note);
+function updateAppSettings(patch) {
+  appSettings = { ...appSettings, ...patch };
+  writeSettings(storageBackend, appSettings);
+}
+
+function noteDateForSave(existing, form) {
+  if (appSettings.noteDateMode === "manual") {
+    return form.elements.date.value;
+  }
+  return existing?.date || toDateKey(new Date());
+}
+
+function beginEditor(kind, mode, id = null) {
+  state.editor = { kind, mode, id };
+  state.returnView = {
+    view: state.view,
+    noteCategory: state.noteCategory,
+    mineSection: state.mineSection,
+    range: state.range,
+  };
+  render();
+}
+
+function closeEditor() {
+  state.editor = null;
+  const returnView = state.returnView;
+  state.view = returnView?.view ?? "notes";
+  state.noteCategory = returnView?.noteCategory ?? "all";
+  state.mineSection = returnView?.mineSection ?? "creations";
+  state.range = returnView?.range ?? "month";
+  render();
+}
+
+function editorTitle() {
+  if (!state.editor) {
+    return "";
+  }
+  if (state.editor.kind === "note") {
+    return state.editor.mode === "create" ? "新建笔记" : "编辑笔记";
+  }
+  return state.editor.mode === "create" ? "新建待办" : "编辑待办";
+}
+
+function noteFormMarkup() {
+  const note = noteFromEditor();
   const title = note?.title ?? "";
   const contentValue = note?.content ?? "";
   const category = note?.category ?? "";
-  const date = note?.date ?? "";
+  const date = note?.date ?? toDateKey(new Date());
   const choices = CATEGORY_KEYS.map(
     (key) =>
-      `<button type="button" class="choice${category === key ? " selected" : ""}" data-category-option="${key}" aria-pressed="${category === key}">${CATEGORY_LABELS[key]}</button>`,
+      `<button type="button" class="choice${category === key ? " is-selected" : ""}" data-category-option="${key}" aria-pressed="${category === key}">${CATEGORY_LABELS[key]}</button>`,
   ).join("");
-
-  return `
-    <form class="note-form" data-testid="note-editor" data-form="note-editor">
-      <div class="editor-head">
-        <h2 data-testid="editor-title">${isEditing ? "编辑笔记" : "新建笔记"}</h2>
-      </div>
-      <div class="form-body">
-        <input type="hidden" name="category" value="${escapeAttribute(category)}" />
-        <div class="field">
-          <label for="note-title">标题</label>
-          <input id="note-title" name="title" type="text" value="${escapeAttribute(title)}" autocomplete="off" />
-        </div>
-        <div class="field">
-          <label for="note-content">内容</label>
-          <textarea id="note-content" name="content" spellcheck="false">${escapeHtml(contentValue)}</textarea>
-        </div>
-        <div class="field">
-          <span>分类</span>
-          <div class="choice-row">${choices}</div>
-        </div>
-        <div class="field">
+  const dateField =
+    appSettings.noteDateMode === "manual"
+      ? `<div class="field note-date-field" data-testid="note-date-field">
           <label for="note-date">日期</label>
           <input id="note-date" name="date" type="date" value="${escapeAttribute(date)}" />
-        </div>
-        <p class="error-text" data-form-errors aria-live="polite"></p>
+        </div>`
+      : "";
+
+  return `
+    <form class="editor-page-form" data-testid="note-editor-page" data-form="note-editor">
+      <input type="hidden" name="category" value="${escapeAttribute(category)}" />
+      <div class="field editor-field">
+        <input id="note-title" name="title" class="title-input" type="text" value="${escapeAttribute(title)}" placeholder="标题" autocomplete="off" aria-label="笔记标题" />
       </div>
-      <div class="form-actions">
-        <button class="button" type="button" data-action="cancel-note">清空</button>
-        <button class="button primary" type="submit">保存笔记</button>
+      <div class="field editor-field editor-content-field">
+        <textarea id="note-content" name="content" placeholder="写下你的想法" spellcheck="false" aria-label="笔记内容">${escapeHtml(contentValue)}</textarea>
       </div>
+      <div class="field editor-field">
+        <div class="choice-row" role="radiogroup" aria-label="笔记分类">${choices}</div>
+      </div>
+      ${dateField}
+      <p class="error-text" data-form-errors aria-live="polite"></p>
+      <button class="button primary editor-submit" type="submit">${state.editor.mode === "create" ? "保存笔记" : "保存修改"}</button>
     </form>
   `;
 }
 
-function todoFormMarkup(todo) {
-  const isEditing = Boolean(todo);
+function todoFormMarkup() {
+  const todo = todoFromEditor();
   const text = todo?.text ?? "";
-  const dueAt = todo?.dueAt ?? "";
-  const cancelButton = isEditing
-    ? '<button class="button" type="button" data-action="cancel-todo">取消编辑</button>'
-    : "";
+  const startAt = todo?.startAt ?? "";
+  const endAt = todo?.endAt ?? "";
   return `
-    <form class="todo-composer" data-testid="todo-editor" data-form="todo-editor">
-      <div class="editor-head">
-        <h2 data-testid="todo-composer-title">${isEditing ? "编辑待办" : "新建待办"}</h2>
+    <form class="editor-page-form" data-testid="todo-editor-page" data-form="todo-editor">
+      <div class="field editor-field">
+        <label for="todo-text">待办内容</label>
+        <input id="todo-text" name="text" type="text" value="${escapeAttribute(text)}" placeholder="要完成的事情" autocomplete="off" />
       </div>
-      <div class="todo-composer-body">
-        <div class="field">
-          <label for="todo-text">待办内容</label>
-          <input id="todo-text" name="text" type="text" value="${escapeAttribute(text)}" autocomplete="off" />
+      <div class="time-grid">
+        <div class="field editor-field">
+          <label for="todo-start">开始时间</label>
+          <input id="todo-start" name="startAt" type="datetime-local" step="60" value="${escapeAttribute(startAt)}" />
         </div>
-        <div class="field">
-          <label for="todo-due">日期时间</label>
-          <input id="todo-due" name="dueAt" type="datetime-local" step="60" value="${escapeAttribute(dueAt)}" />
+        <div class="field editor-field">
+          <label for="todo-end">结束时间</label>
+          <input id="todo-end" name="endAt" type="datetime-local" step="60" value="${escapeAttribute(endAt)}" />
         </div>
-        <button class="button primary" type="submit">${isEditing ? "保存修改" : "添加待办"}</button>
-        ${cancelButton}
       </div>
-      <div class="todo-error-row">
-        <p class="error-text" data-form-errors aria-live="polite"></p>
-      </div>
+      <p class="error-text" data-form-errors aria-live="polite"></p>
+      <button class="button primary editor-submit" type="submit">${state.editor.mode === "create" ? "添加待办" : "保存修改"}</button>
     </form>
   `;
 }
 
-function dueLabel(dueAt) {
-  return dueAt.replace("T", " ");
-}
-
-function renderTodoRows(todos, completed) {
-  if (!todos.length) {
-    return `<div class="empty-state">${completed ? "暂无已完成待办" : "暂无未完成待办"}</div>`;
+function renderEditor() {
+  if (!state.editor) {
+    return "";
   }
-  return todos
-    .map(
-      (todo) => `
-        <div class="todo-row${todo.completed ? " is-completed" : ""}" data-testid="todo-item" data-todo-id="${todo.id}">
-          <button
-            class="todo-check${todo.completed ? " is-done" : ""}"
-            type="button"
-            data-action="toggle-todo"
-            data-id="${todo.id}"
-            aria-label="${todo.completed ? "取消完成" : "标记完成"}"
-          ></button>
-          <div class="todo-copy">
-            <p class="todo-text">${escapeHtml(todo.text)}</p>
-            <time datetime="${escapeAttribute(todo.dueAt)}">${escapeHtml(dueLabel(todo.dueAt))}</time>
-          </div>
-          <button class="icon-button" type="button" data-action="edit-todo" data-id="${todo.id}" aria-label="编辑待办">编</button>
-          <button class="icon-button" type="button" data-action="delete-todo" data-id="${todo.id}" aria-label="删除待办">删</button>
-        </div>
-      `,
-    )
-    .join("");
-}
-
-function renderTodosView() {
-  const todos = repository
-    .items()
-    .filter((item) => item.kind === "todo");
-  const uncompleted = sortTodos(todos.filter((todo) => !todo.completed));
-  const completed = sortTodos(todos.filter((todo) => todo.completed)).reverse();
-  const editingTodo =
-    state.todoEditingId
-      ? todos.find((todo) => todo.id === state.todoEditingId) ?? null
-      : null;
-
   return `
-    <div class="view todos-view" data-testid="todos-view">
-      <div class="todos-layout">
-        ${todoFormMarkup(editingTodo)}
-        <div class="todo-lists">
-          <section class="surface-pane todo-list-pane" data-testid="todo-pending">
-            <div class="list-heading">
-              <h2>未完成</h2>
-              <span class="count-badge">${uncompleted.length}</span>
-            </div>
-            <div class="scroll-list">${renderTodoRows(uncompleted, false)}</div>
-          </section>
-          <section class="surface-pane todo-list-pane" data-testid="todo-completed">
-            <div class="list-heading">
-              <h2>已完成</h2>
-              <span class="count-badge">${completed.length}</span>
-            </div>
-            <div class="scroll-list">${renderTodoRows(completed, true)}</div>
-          </section>
-        </div>
+    <div class="view editor-scroll view-enter" data-testid="editor-view">
+      <div class="editor-shell">
+        <header class="editor-heading">
+          <h2>${editorTitle()}</h2>
+        </header>
+        ${state.editor.kind === "note" ? noteFormMarkup() : todoFormMarkup()}
       </div>
-    </div>
-  `;
-}
-
-function itemTypeLabel(item) {
-  return item.kind === "note" ? "笔记" : "待办";
-}
-
-function itemSummary(item) {
-  if (item.kind === "note") {
-    return item.content;
-  }
-  return item.completed ? `已完成 · ${dueLabel(item.dueAt)}` : `截止 ${dueLabel(item.dueAt)}`;
-}
-
-function renderMineView() {
-  if (state.mineSection === "settings") {
-    return `
-      <div class="view mine-view" data-testid="mine-view">
-        <div class="section-tabs" role="tablist" aria-label="我的二级导航">
-          <button class="section-tab" type="button" data-action="mine-section" data-section="creations">我的创作</button>
-          <button class="section-tab is-active" type="button" data-action="mine-section" data-section="settings">设置</button>
-        </div>
-        <section class="surface-pane settings-pane" data-testid="settings-view">
-          <div class="settings-empty">设置内容将在后续版本补充</div>
-        </section>
-      </div>
-    `;
-  }
-
-  const records = listForRange(repository.items(), state.range);
-  const stats = summarizeItems(records);
-  const rangeName = state.range === "month" ? "本月创作" : "全部创作";
-  const rows = records.length
-    ? records
-        .map(
-          (item) => `
-            <button class="timeline-item" type="button" data-action="open-content" data-id="${item.id}" data-kind="${item.kind}">
-              <span class="timeline-type">${itemTypeLabel(item)}</span>
-              <span class="timeline-copy">
-                <strong>${escapeHtml(item.title ?? item.text)}</strong>
-                <span class="timeline-summary">${escapeHtml(itemSummary(item))}</span>
-              </span>
-              <span class="timeline-date">${escapeHtml(item.kind === "note" ? item.date : item.dueAt.slice(0, 10))}</span>
-            </button>
-          `,
-        )
-        .join("")
-    : '<div class="empty-state">当前范围没有内容</div>';
-
-  return `
-    <div class="view mine-view" data-testid="mine-view">
-      <div class="section-tabs" role="tablist" aria-label="我的二级导航">
-        <button class="section-tab is-active" type="button" data-action="mine-section" data-section="creations">我的创作</button>
-        <button class="section-tab" type="button" data-action="mine-section" data-section="settings">设置</button>
-      </div>
-      <div class="range-row">
-        <button class="range-button${state.range === "month" ? " is-active" : ""}" type="button" data-action="set-range" data-range="month">本月创作</button>
-        <button class="range-button${state.range === "all" ? " is-active" : ""}" type="button" data-action="set-range" data-range="all">全部创作</button>
-      </div>
-      <div class="stats-row">
-        <div class="stat-card" data-testid="stat-total">
-          <span class="stat-value">${stats.total}</span>
-          <span class="stat-label">总内容</span>
-        </div>
-        <div class="stat-card" data-testid="stat-notes">
-          <span class="stat-value">${stats.notes}</span>
-          <span class="stat-label">笔记</span>
-        </div>
-        <div class="stat-card" data-testid="stat-todos">
-          <span class="stat-value">${stats.todos}</span>
-          <span class="stat-label">待办</span>
-        </div>
-      </div>
-      <section class="surface-pane timeline-pane">
-        <div class="list-heading">
-          <h2>${rangeName}</h2>
-          <span class="count-badge">${records.length}</span>
-        </div>
-        <div class="scroll-list">${rows}</div>
-      </section>
     </div>
   `;
 }
@@ -326,60 +243,217 @@ function renderNotesView() {
   const chips = categories
     .map(
       (category) =>
-        `<button type="button" class="filter-chip${state.noteCategory === category.key ? "" : ""}" data-category-filter="${category.key}" aria-pressed="${state.noteCategory === category.key}">${category.label}<span class="count">${category.count}</span></button>`,
+        `<button type="button" class="filter-chip${state.noteCategory === category.key ? " is-active" : ""}" data-category-filter="${category.key}" aria-pressed="${state.noteCategory === category.key}">${category.label}<span class="count">${category.count}</span></button>`,
     )
     .join("");
-
-  const list = notes.length
+  const cards = notes.length
     ? notes
         .map(
           (note) => `
-          <article class="note-item" data-testid="note-item" data-note-id="${note.id}">
-            <button class="note-summary" type="button" data-action="open-note" data-id="${note.id}">
-              <h3>${escapeHtml(note.title)}</h3>
-              <p>${escapeHtml(note.content)}</p>
-              <div class="note-meta">
-                <span class="tag ${escapeAttribute(note.category)}">${categoryLabel(note.category)}</span>
-                <time datetime="${escapeAttribute(note.date)}">${escapeHtml(note.date)}</time>
-              </div>
-            </button>
-            <button class="icon-button" type="button" data-action="delete-note" data-id="${note.id}" aria-label="删除这篇笔记">删</button>
-          </article>
-        `,
+            <article class="note-card note-${escapeAttribute(note.category)}" data-testid="note-item" data-note-id="${note.id}">
+              <button class="note-card-main" type="button" data-action="open-note" data-id="${note.id}">
+                <div class="note-card-head">
+                  <span class="category-dot"></span>
+                  <h3>${escapeHtml(note.title)}</h3>
+                  <time datetime="${escapeAttribute(note.date)}">${escapeHtml(note.date)}</time>
+                </div>
+                <p>${escapeHtml(note.content)}</p>
+              </button>
+              <button class="delete-button" type="button" data-action="delete-note" data-id="${note.id}" aria-label="删除笔记">删除</button>
+            </article>
+          `,
         )
         .join("")
-    : '<div class="empty-state">还没有笔记</div>';
+    : '<div class="empty-state soft">还没有笔记</div>';
 
   return `
-    <div class="view" data-testid="notes-view">
-      <div class="notes-layout">
-        <section class="surface-pane">
-          <div class="category-bar">${chips}</div>
-          <div class="scroll-list">${list}</div>
-        </section>
-        <section class="surface-pane editor-pane">${noteFormMarkup(noteFromState())}</section>
-      </div>
+    <div class="view collection-view view-enter" data-testid="notes-list-view">
+      <div class="category-bar">${chips}</div>
+      <div class="card-grid note-grid">${cards}</div>
     </div>
   `;
 }
 
-function placeholderMarkup(label) {
-  return `<div class="view placeholder-view" data-testid="${label}-placeholder">${label}将在后续阶段加入</div>`;
+function timeRangeLabel(todo) {
+  return `${formatLocalDateTime(todo.startAt)} 至 ${formatLocalDateTime(todo.endAt)}`;
+}
+
+function renderTodoRows() {
+  const todos = sortTodos(
+    repository
+      .items()
+      .filter((item) => item.kind === "todo"),
+  );
+  if (!todos.length) {
+    return '<div class="empty-state soft">还没有待办</div>';
+  }
+  return todos
+    .map(
+      (todo) => `
+        <article class="todo-card${todo.completed ? " is-completed" : ""}" data-testid="todo-item" data-todo-id="${todo.id}">
+          <button
+            class="todo-check${todo.completed ? " is-done" : ""}"
+            type="button"
+            data-action="toggle-todo"
+            data-id="${todo.id}"
+            aria-label="${todo.completed ? "取消完成" : "标记完成"}"
+          ></button>
+          <button class="todo-card-main" type="button" data-action="open-todo" data-id="${todo.id}">
+            <span class="todo-text">${escapeHtml(todo.text)}</span>
+            <time>${escapeHtml(timeRangeLabel(todo))}</time>
+          </button>
+          <button class="delete-button" type="button" data-action="delete-todo" data-id="${todo.id}" aria-label="删除待办">删除</button>
+          <span class="status-foot ${todo.completed ? "done" : "open"}">${todo.completed ? "已完成" : "未完成"}</span>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+function renderTodosView() {
+  return `
+    <div class="view collection-view view-enter" data-testid="todos-list-view">
+      <div class="section-heading-row">
+        <span>全部待办</span>
+      </div>
+      <div class="todo-list">${renderTodoRows()}</div>
+    </div>
+  `;
+}
+
+function itemSummary(item) {
+  if (item.kind === "note") {
+    return item.content;
+  }
+  return `${timeRangeLabel(item)} · ${item.completed ? "已完成" : "未完成"}`;
+}
+
+function itemDateLabel(item) {
+  if (item.kind === "note") {
+    return item.date;
+  }
+  return (item.startAt ?? item.endAt ?? "").slice(0, 10);
+}
+
+function renderMineView() {
+  const tab = (section, label) =>
+    `<button class="section-tab${state.mineSection === section ? " is-active" : ""}" type="button" data-action="mine-section" data-section="${section}">${label}</button>`;
+  const settingsMarkup = `
+    <div class="view mine-view view-enter" data-testid="mine-view">
+      <div class="section-tabs">${tab("creations", "我的创作")}${tab("settings", "设置")}</div>
+      <div class="settings-stack" data-testid="settings-view">
+        <section class="settings-card">
+          <div class="settings-card-head">
+            <h2>时间设置</h2>
+          </div>
+          <div class="setting-row">
+            <strong>笔记日期</strong>
+            <div class="segmented-control">
+              <button class="${appSettings.noteDateMode === "auto" ? "is-active" : ""}" type="button" data-action="note-date-mode" data-mode="auto">自动</button>
+              <button class="${appSettings.noteDateMode === "manual" ? "is-active" : ""}" type="button" data-action="note-date-mode" data-mode="manual">手动</button>
+            </div>
+          </div>
+          <form class="setting-row" data-form="settings-grace">
+            <strong>待办过期等待</strong>
+            <div class="grace-field">
+              <input name="todoGraceMinutes" type="number" min="0" max="1440" step="1" value="${appSettings.todoGraceMinutes}" />
+              <span>分钟</span>
+              <button class="button small-button" type="submit">保存</button>
+            </div>
+          </form>
+        </section>
+        <section class="settings-card">
+          <div class="settings-card-head">
+            <h2>版本说明</h2>
+            <span>第二版</span>
+          </div>
+          <ul class="version-list">
+            <li>新增：笔记和待办采用独立的新建与编辑页面。</li>
+            <li>新增：待办支持开始时间与结束时间。</li>
+            <li>新增：时间设置与版本说明页面。</li>
+            <li>修改：笔记日期改为自动获取，可在设置中选择手动填写。</li>
+            <li>修改：待办过期清理时间调整为结束后 5 分钟。</li>
+            <li>修改：整体视觉与交互动效更新。</li>
+          </ul>
+        </section>
+      </div>
+    </div>
+  `;
+
+  if (state.mineSection === "settings") {
+    return settingsMarkup;
+  }
+
+  const records = listForRange(repository.items(), state.range);
+  const stats = summarizeItems(records);
+  const rangeName = state.range === "month" ? "本月创作" : "全部创作";
+  const rows = records.length
+    ? records
+        .map(
+          (item) => `
+            <button class="timeline-item" type="button" data-action="open-content" data-id="${item.id}" data-kind="${item.kind}">
+              <span class="timeline-type ${item.kind}">${item.kind === "note" ? "笔记" : "待办"}</span>
+              <span class="timeline-copy">
+                <strong>${escapeHtml(item.title ?? item.text)}</strong>
+                <span class="timeline-summary">${escapeHtml(itemSummary(item))}</span>
+              </span>
+              <span class="timeline-date">${escapeHtml(itemDateLabel(item))}</span>
+            </button>
+          `,
+        )
+        .join("")
+    : '<div class="empty-state soft">当前范围没有内容</div>';
+
+  return `
+    <div class="view mine-view view-enter" data-testid="mine-view">
+      <div class="section-tabs">${tab("creations", "我的创作")}${tab("settings", "设置")}</div>
+      <div class="range-row">
+        <button class="range-button${state.range === "month" ? " is-active" : ""}" type="button" data-action="set-range" data-range="month">本月创作</button>
+        <button class="range-button${state.range === "all" ? " is-active" : ""}" type="button" data-action="set-range" data-range="all">全部创作</button>
+      </div>
+      <div class="stats-row">
+        <div class="stat-card" data-testid="stat-total">
+          <span class="stat-value">${stats.total}</span>
+          <span class="stat-label">总内容</span>
+        </div>
+        <div class="stat-card" data-testid="stat-notes">
+          <span class="stat-value">${stats.notes}</span>
+          <span class="stat-label">笔记</span>
+        </div>
+        <div class="stat-card" data-testid="stat-todos">
+          <span class="stat-value">${stats.todos}</span>
+          <span class="stat-label">待办</span>
+        </div>
+      </div>
+      <section class="timeline-pane">
+        <div class="list-heading">
+          <h2>${rangeName}</h2>
+          <span class="count-badge">${records.length}</span>
+        </div>
+        <div class="scroll-list">${rows}</div>
+      </section>
+    </div>
+  `;
 }
 
 function render() {
-  const viewName = VIEW_NAMES[state.view];
-  pageTitle.textContent = viewName;
-  pageActions.innerHTML =
-    state.view === "notes"
+  const composing = Boolean(state.editor);
+  pageTitle.textContent = composing ? editorTitle() : VIEW_NAMES[state.view];
+  pageActions.innerHTML = composing
+    ? '<button class="back-button" type="button" data-action="cancel-editor">返回</button>'
+    : state.view === "notes"
       ? '<button class="button primary" type="button" data-action="new-note">新建笔记</button>'
-      : "";
-  content.innerHTML =
-    state.view === "notes"
+      : state.view === "todos"
+        ? '<button class="button primary" type="button" data-action="new-todo">新建待办</button>'
+        : "";
+  content.innerHTML = composing
+    ? renderEditor()
+    : state.view === "notes"
       ? renderNotesView()
       : state.view === "todos"
         ? renderTodosView()
         : renderMineView();
+  document.body.classList.toggle("is-composing", composing);
   updateNavigation();
   syncLocation();
 }
@@ -418,7 +492,7 @@ function showToast(message) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
     toast.hidden = true;
-  }, 2200);
+  }, 2400);
 }
 
 function showConfirm({ title, detail, actionLabel }, onConfirm) {
@@ -447,59 +521,10 @@ function deleteNote(id) {
     },
     () => {
       repository.remove(id);
-      if (state.selectedNoteId === id) {
-        state.selectedNoteId = null;
-      }
       render();
       showToast("笔记已删除");
     },
   );
-}
-
-function saveNoteFromForm(form) {
-  const draft = {
-    title: form.elements.title.value,
-    content: form.elements.content.value,
-    category: form.elements.category.value,
-    date: form.elements.date.value,
-  };
-  try {
-    const existing = noteFromState();
-    const saved = existing ? updateNote(existing, draft) : createNote(draft);
-    repository.upsert(saved);
-    state.selectedNoteId = saved.id;
-    state.noteCategory = saved.category;
-    render();
-    showToast(existing ? "笔记已更新" : "笔记已保存");
-  } catch (error) {
-    const errorElement = form.querySelector("[data-form-errors]");
-    errorElement.textContent = error.validation?.join("；") ?? "保存失败，请检查填写内容";
-  }
-}
-
-function saveTodoFromForm(form) {
-  const draft = {
-    text: form.elements.text.value,
-    dueAt: form.elements.dueAt.value,
-  };
-  try {
-    const existing = state.todoEditingId
-      ? repository.items().find((item) => item.id === state.todoEditingId && item.kind === "todo")
-      : null;
-    const saved = existing ? updateTodo(existing, draft) : createTodo(draft);
-    repository.upsert(saved);
-    state.todoEditingId = null;
-    const removedCount = runOverdueCheck({ notify: false });
-    if (removedCount > 0) {
-      showToast(`已自动清理 ${removedCount} 条过期未完成待办`);
-    } else {
-      render();
-      showToast(existing ? "待办已更新" : "待办已添加");
-    }
-  } catch (error) {
-    const errorElement = form.querySelector("[data-form-errors]");
-    errorElement.textContent = error.validation?.join("；") ?? "保存失败，请检查填写内容";
-  }
 }
 
 function deleteTodo(id) {
@@ -515,13 +540,53 @@ function deleteTodo(id) {
     },
     () => {
       repository.remove(id);
-      if (state.todoEditingId === id) {
-        state.todoEditingId = null;
-      }
       render();
       showToast("待办已删除");
     },
   );
+}
+
+function saveNoteFromForm(form) {
+  const existing = noteFromEditor();
+  const draft = {
+    title: form.elements.title.value,
+    content: form.elements.content.value,
+    category: form.elements.category.value,
+    date: noteDateForSave(existing, form),
+  };
+  try {
+    const saved = existing ? updateNote(existing, draft) : createNote(draft);
+    repository.upsert(saved);
+    state.noteCategory = saved.category;
+    closeEditor();
+    showToast(existing ? "笔记已更新" : "笔记已保存");
+  } catch (error) {
+    const errorElement = form.querySelector("[data-form-errors]");
+    errorElement.textContent = error.validation?.join("；") ?? "保存失败，请检查填写内容";
+  }
+}
+
+function saveTodoFromForm(form) {
+  const existing = todoFromEditor();
+  const draft = {
+    text: form.elements.text.value,
+    startAt: form.elements.startAt.value,
+    endAt: form.elements.endAt.value,
+  };
+  try {
+    const saved = existing ? updateTodo(existing, draft) : createTodo(draft);
+    repository.upsert(saved);
+    closeEditor();
+    const removedCount = runOverdueCheck({ notify: false });
+    if (removedCount > 0) {
+      showToast(`已自动清理 ${removedCount} 条过期未完成待办`);
+    } else {
+      showToast(existing ? "待办已更新" : "待办已添加");
+    }
+  } catch (error) {
+    const errorElement = form.querySelector("[data-form-errors]");
+    errorElement.textContent = error.validation?.join("；") ?? "保存失败，请检查填写内容";
+  }
 }
 
 function toggleTodo(id) {
@@ -536,7 +601,11 @@ function toggleTodo(id) {
 }
 
 function runOverdueCheck({ notify = true } = {}) {
-  const result = purgeOverdueTodos(repository.items(), new Date());
+  const result = purgeOverdueTodos(
+    repository.items(),
+    new Date(),
+    appSettings.todoGraceMinutes,
+  );
   if (!result.removed.length) {
     return 0;
   }
@@ -553,27 +622,14 @@ function openContentItem(id) {
   if (!item) {
     return;
   }
-  if (item.kind === "note") {
-    state.view = "notes";
-    state.noteCategory = "all";
-    state.selectedNoteId = item.id;
-  } else {
-    state.view = "todos";
-    state.todoEditingId = item.id;
-  }
-  render();
-}
-
-function selectCategory(category) {
-  state.noteCategory = category;
-  state.selectedNoteId = null;
-  render();
+  beginEditor(item.kind, "edit", item.id);
 }
 
 function selectView(view) {
   if (!VIEW_NAMES[view]) {
     return;
   }
+  state.editor = null;
   state.view = view;
   render();
 }
@@ -585,62 +641,64 @@ document.addEventListener("click", (event) => {
     return;
   }
 
-  const actionElement = event.target.closest("[data-action]");
-  if (actionElement) {
-    const action = actionElement.dataset.action;
-    const id = actionElement.dataset.id;
-    if (action === "new-note") {
-      state.selectedNoteId = null;
-      render();
-    } else if (action === "open-note" || action === "edit-note") {
-      state.selectedNoteId = id;
-      render();
-    } else if (action === "delete-note") {
-      deleteNote(id);
-    } else if (action === "cancel-note") {
-      state.selectedNoteId = null;
-      render();
-    } else if (action === "edit-todo") {
-      state.todoEditingId = id;
-      render();
-    } else if (action === "cancel-todo") {
-      state.todoEditingId = null;
-      render();
-    } else if (action === "delete-todo") {
-      deleteTodo(id);
-    } else if (action === "toggle-todo") {
-      toggleTodo(id);
-    } else if (action === "mine-section") {
-      state.mineSection = actionElement.dataset.section;
-      render();
-    } else if (action === "set-range") {
-      state.range = actionElement.dataset.range;
-      render();
-    } else if (action === "open-content") {
-      openContentItem(id);
-    } else if (action === "close-confirm") {
-      closeConfirm();
+  const categoryOption = event.target.closest("[data-category-option]");
+  if (categoryOption) {
+    document.querySelectorAll("[data-category-option]").forEach((button) => {
+      const selected = button === categoryOption;
+      button.setAttribute("aria-pressed", String(selected));
+      button.classList.toggle("is-selected", selected);
+    });
+    const hiddenInput = document.querySelector('input[name="category"]');
+    if (hiddenInput) {
+      hiddenInput.value = categoryOption.dataset.categoryOption;
     }
     return;
   }
 
   const categoryFilter = event.target.closest("[data-category-filter]");
   if (categoryFilter) {
-    selectCategory(categoryFilter.dataset.categoryFilter);
+    state.noteCategory = categoryFilter.dataset.categoryFilter;
+    render();
     return;
   }
 
-  const categoryOption = event.target.closest("[data-category-option]");
-  if (categoryOption) {
-    document.querySelectorAll("[data-category-option]").forEach((button) => {
-      const selected = button === categoryOption;
-      button.setAttribute("aria-pressed", String(selected));
-      button.classList.toggle("selected", selected);
-    });
-    const hiddenInput = document.querySelector('input[name="category"]');
-    if (hiddenInput) {
-      hiddenInput.value = categoryOption.dataset.categoryOption;
-    }
+  const actionElement = event.target.closest("[data-action]");
+  if (!actionElement) {
+    return;
+  }
+  const action = actionElement.dataset.action;
+  const id = actionElement.dataset.id;
+  if (action === "new-note") {
+    beginEditor("note", "create");
+  } else if (action === "new-todo") {
+    beginEditor("todo", "create");
+  } else if (action === "open-note" || action === "edit-note") {
+    beginEditor("note", "edit", id);
+  } else if (action === "open-todo" || action === "edit-todo") {
+    beginEditor("todo", "edit", id);
+  } else if (action === "delete-note") {
+    deleteNote(id);
+  } else if (action === "delete-todo") {
+    deleteTodo(id);
+  } else if (action === "toggle-todo") {
+    toggleTodo(id);
+  } else if (action === "cancel-editor") {
+    closeEditor();
+  } else if (action === "mine-section") {
+    state.mineSection = actionElement.dataset.section;
+    render();
+  } else if (action === "set-range") {
+    state.range = actionElement.dataset.range;
+    render();
+  } else if (action === "open-content") {
+    openContentItem(id);
+  } else if (action === "note-date-mode") {
+    const mode = actionElement.dataset.mode;
+    updateAppSettings({ noteDateMode: mode === "manual" ? "manual" : "auto" });
+    render();
+    showToast(mode === "manual" ? "笔记日期已改为手动填写" : "笔记日期已改为自动获取");
+  } else if (action === "close-confirm") {
+    closeConfirm();
   }
 });
 
@@ -655,6 +713,18 @@ document.addEventListener("submit", (event) => {
   if (todoForm) {
     event.preventDefault();
     saveTodoFromForm(todoForm);
+    return;
+  }
+  const graceForm = event.target.closest("[data-form='settings-grace']");
+  if (graceForm) {
+    event.preventDefault();
+    const minutes = Math.min(
+      1440,
+      Math.max(0, Math.round(Number(graceForm.elements.todoGraceMinutes.value))),
+    );
+    updateAppSettings({ todoGraceMinutes: minutes });
+    render();
+    showToast(`待办过期等待已设为 ${minutes} 分钟`);
   }
 });
 

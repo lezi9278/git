@@ -16,7 +16,6 @@ function createSeedData() {
   const lastDay = new Date(year, month, 0).getDate();
   const currentMonthDate = localDate(year, month, lastDay);
   const previousMonthDate = localDate(previousYear, previousMonth, 18);
-
   const timestamp = `${currentMonthDate}T00:00:00.000Z`;
   return {
     currentNote: {
@@ -43,16 +42,17 @@ function createSeedData() {
       id: "todo-current",
       kind: "todo",
       text: "本月待办",
-      dueAt: `${currentMonthDate}T23:59`,
+      startAt: `${currentMonthDate}T09:00`,
+      endAt: `${currentMonthDate}T10:00`,
       completed: true,
-      completedAt: `${currentMonthDate}T23:00:00.000Z`,
+      completedAt: `${currentMonthDate}T10:00:00.000Z`,
       createdAt: timestamp,
       updatedAt: timestamp,
     },
   };
 }
 
-test("我的创作统计、时间线、设置页与内容跳转", async (t) => {
+test("第二版我的创作、设置与笔记日期设置", async (t) => {
   const { server, url } = await startTestServer();
   const browser = await launchBrowser();
   t.after(async () => {
@@ -73,10 +73,7 @@ test("我的创作统计、时间线、设置页与内容跳转", async (t) => {
         JSON.stringify([payload.currentNote, payload.previousNote, payload.currentTodo]),
       );
     },
-    {
-      key: "local-notes:items:v1",
-      ...seed,
-    },
+    { key: "local-notes:items:v1", ...seed },
   );
   await page.reload();
 
@@ -92,21 +89,31 @@ test("我的创作统计、时间线、设置页与内容跳转", async (t) => {
   assert.equal(await page.locator('[data-testid="stat-total"] .stat-value').textContent(), "3");
   assert.equal(await page.locator('[data-testid="mine-view"]').getByText("上月生活").count(), 1);
 
-  await page
-    .locator('.timeline-item:has-text("本月感悟")')
-    .click();
-  await page.locator('[data-testid="notes-view"]').waitFor();
+  await page.locator('.timeline-item:has-text("本月感悟")').click();
+  await page.locator('[data-testid="note-editor-page"]').waitFor();
   assert.equal(await page.locator('input[name="title"]').inputValue(), "本月感悟");
+  await page.locator('[data-action="cancel-editor"]').click();
+  await page.locator('[data-testid="mine-view"]').waitFor();
+
+  await page.locator('[data-action="mine-section"][data-section="settings"]').click();
+  await page.locator('[data-testid="settings-view"]').waitFor();
+  assert.match(await page.locator('[data-testid="settings-view"]').textContent(), /第二版/);
+
+  await page.locator('[data-action="note-date-mode"][data-mode="manual"]').click();
+  await page.locator('[data-view="notes"]').click();
+  await page.locator('[data-action="new-note"]').click();
+  await page.locator('[data-testid="note-editor-page"]').waitFor();
+  assert.equal(await page.locator('[data-testid="note-date-field"]').count(), 1);
+  await page.locator('[data-action="cancel-editor"]').click();
 
   await page.locator('[data-view="mine"]').click();
   await page.locator('[data-action="mine-section"][data-section="settings"]').click();
-  await page.locator('[data-testid="settings-view"]').waitFor();
-  assert.match(
-    await page.locator('[data-testid="settings-view"]').textContent(),
-    /后续版本/,
-  );
+  await page.locator('input[name="todoGraceMinutes"]').fill("10");
+  await page.locator('[data-form="settings-grace"] button[type="submit"]').click();
+  assert.equal(await page.locator('input[name="todoGraceMinutes"]').inputValue(), "10");
 
-  await page.locator('[data-action="mine-section"][data-section="creations"]').click();
-  await page.locator('[data-testid="mine-view"]').waitFor();
-  assert.equal(await page.locator('[data-testid="mine-view"]').getByText("本月待办").count(), 1);
+  await page.reload();
+  await page.locator('[data-view="mine"]').click();
+  await page.locator('[data-action="mine-section"][data-section="settings"]').click();
+  assert.equal(await page.locator('input[name="todoGraceMinutes"]').inputValue(), "10");
 });

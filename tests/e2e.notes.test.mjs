@@ -2,49 +2,52 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { launchBrowser, startTestServer } from "./helpers/browser.mjs";
 
-async function resetData(page) {
-  await page.goto(`${globalThis.__testBaseUrl}/`);
-  await page.evaluate(() => {
-    window.localStorage.clear();
-  });
-  await page.reload();
+function todayKey() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-test("应用外壳与笔记模块浏览器流程", async (t) => {
+test("第二版笔记列表、独立编辑页与分类流程", async (t) => {
   const { server, url } = await startTestServer();
   const browser = await launchBrowser();
-  globalThis.__testBaseUrl = url;
   t.after(async () => {
-    delete globalThis.__testBaseUrl;
     await browser.close();
     await new Promise((resolve) => server.close(resolve));
   });
 
   const page = await browser.newPage();
-  await resetData(page);
-
-  assert.equal(await page.locator(".nav-item").count(), 3);
+  await page.goto(`${url}/`);
+  await page.evaluate(() => {
+    window.localStorage.clear();
+  });
+  await page.reload();
   await page.locator('[data-view="notes"]').click();
-  await page.locator('[data-testid="notes-view"]').waitFor();
+  await page.locator('[data-testid="notes-list-view"]').waitFor();
+
+  await page.locator('[data-action="new-note"]').click();
+  await page.locator('[data-testid="note-editor-page"]').waitFor();
+  assert.equal(await page.locator('[data-testid="note-date-field"]').count(), 0);
 
   await page.locator('input[name="title"]').fill("第一次整理");
   await page.locator('textarea[name="content"]').fill("把一段零散思考整理成完整记录。");
   await page.locator('[data-category-option="life"]').click();
-  await page.locator('input[name="date"]').fill("2026-09-08");
   await page.locator('button[type="submit"]').click();
 
   const noteItem = page.locator('[data-testid="note-item"]').first();
   await noteItem.waitFor();
-  assert.match(await page.locator('[data-testid="note-item"]').first().textContent(), /第一次整理/);
+  assert.match(await noteItem.textContent(), /第一次整理/);
+  assert.match(await noteItem.textContent(), new RegExp(todayKey()));
 
   await noteItem.locator('[data-action="open-note"]').click();
+  await page.locator('[data-testid="note-editor-page"]').waitFor();
   assert.equal(await page.locator('input[name="title"]').inputValue(), "第一次整理");
+  assert.equal(await page.locator('[data-testid="note-date-field"]').count(), 0);
   await page.locator('input[name="title"]').fill("第一次整理（已修改）");
   await page.locator('textarea[name="content"]').fill("修改后的正文。");
   await page.locator('[data-category-option="thinking"]').click();
-  await page.locator('input[name="date"]').fill("2026-09-09");
   await page.locator('button[type="submit"]').click();
-  await page.locator('[data-testid="note-item"]').first().waitFor();
+  await page.locator('[data-testid="notes-list-view"]').waitFor();
   assert.match(
     await page.locator('[data-testid="note-item"]').first().textContent(),
     /第一次整理（已修改）/,
@@ -58,7 +61,8 @@ test("应用外壳与笔记模块浏览器流程", async (t) => {
   assert.equal(await page.locator('[data-testid="note-item"]').count(), 1);
 
   await page.reload();
-  await page.locator('[data-testid="notes-view"]').waitFor();
+  await page.locator('[data-view="notes"]').click();
+  await page.locator('[data-testid="notes-list-view"]').waitFor();
   assert.match(
     await page.locator('[data-testid="note-item"]').first().textContent(),
     /第一次整理（已修改）/,
@@ -79,8 +83,9 @@ test("应用外壳与笔记模块浏览器流程", async (t) => {
     /标题不能为空/,
   );
 
+  await page.locator('[data-action="cancel-editor"]').click();
   await page.locator('[data-view="todos"]').click();
-  await page.locator('[data-testid="todos-view"]').waitFor();
+  await page.locator('[data-testid="todos-list-view"]').waitFor();
   await page.locator('[data-view="mine"]').click();
   await page.locator('[data-testid="mine-view"]').waitFor();
 });
