@@ -46,3 +46,17 @@ export function isValidDateKey(value) {
 export function isValidDateTimeValue(value) {
   return parseLocalDateTime(value) !== null;
 }
+
+export function addMinutesToLocalDateTime(value, minutes) {
+  const date = parseLocalDateTime(value);
+  if (!date) {
+    return null;
+  }
+  date.setMinutes(date.getMinutes() + minutes);
+  const pad = (number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+export function formatLocalDateTime(value) {
+  return typeof value === "string" ? value.replace("T", " ") : "";
+}

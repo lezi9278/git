@@ -5,7 +5,7 @@ export function recordDateKey(item) {
     return item.date;
   }
   if (item.kind === "todo") {
-    return item.dueAt.slice(0, 10);
+    return (item.startAt ?? item.endAt ?? "").slice(0, 10);
   }
   return "";
 }

@@ -1,15 +1,30 @@
 import { makeId } from "./notes.js";
-import { parseLocalDateTime, isValidDateTimeValue } from "./time.js";
+import {
+  addMinutesToLocalDateTime,
+  isValidDateTimeValue,
+  parseLocalDateTime,
+} from "./time.js";
 
 export function validateTodoDraft(draft) {
   const text = typeof draft.text === "string" ? draft.text.trim() : "";
-  const dueAt = draft.dueAt;
+  const startAt = draft.startAt;
+  const endAt = draft.endAt;
   const errors = [];
   if (!text) {
     errors.push("待办内容不能为空");
   }
-  if (!isValidDateTimeValue(dueAt)) {
-    errors.push("请选择有效的日期和时间");
+  if (!isValidDateTimeValue(startAt)) {
+    errors.push("请选择有效的开始时间");
+  }
+  if (!isValidDateTimeValue(endAt)) {
+    errors.push("请选择有效的结束时间");
+  }
+  if (
+    isValidDateTimeValue(startAt) &&
+    isValidDateTimeValue(endAt) &&
+    parseLocalDateTime(endAt).getTime() <= parseLocalDateTime(startAt).getTime()
+  ) {
+    errors.push("结束时间必须晚于开始时间");
   }
   return { valid: errors.length === 0, errors };
 }
@@ -26,7 +41,8 @@ export function createTodo(draft, now = new Date()) {
     id: makeId("todo"),
     kind: "todo",
     text: draft.text.trim(),
-    dueAt: draft.dueAt,
+    startAt: draft.startAt,
+    endAt: draft.endAt,
     completed: false,
     completedAt: null,
     createdAt: timestamp,
@@ -45,7 +61,8 @@ export function updateTodo(todo, draft, now = new Date()) {
     ...todo,
     kind: "todo",
     text: draft.text.trim(),
-    dueAt: draft.dueAt,
+    startAt: draft.startAt,
+    endAt: draft.endAt,
     updatedAt: now.toISOString(),
   };
 }
@@ -59,7 +76,7 @@ export function setTodoCompleted(todo, completed, now = new Date()) {
   };
 }
 
-export function purgeOverdueTodos(items, now = new Date()) {
+export function purgeOverdueTodos(items, now = new Date(), graceMinutes = 5) {
   const currentTime = now instanceof Date ? now.getTime() : new Date(now).getTime();
   const remaining = [];
   const removed = [];
@@ -68,8 +85,9 @@ export function purgeOverdueTodos(items, now = new Date()) {
       remaining.push(item);
       continue;
     }
-    const dueTime = parseLocalDateTime(item.dueAt);
-    if (dueTime && dueTime.getTime() <= currentTime) {
+    const expiry = addMinutesToLocalDateTime(item.endAt, graceMinutes);
+    const expiryTime = expiry ? parseLocalDateTime(expiry).getTime() : null;
+    if (expiryTime !== null && expiryTime <= currentTime) {
       removed.push(item);
     } else {
       remaining.push(item);
@@ -80,8 +98,11 @@ export function purgeOverdueTodos(items, now = new Date()) {
 
 export function sortTodos(items) {
   return [...items].sort((left, right) => {
-    const leftTime = parseLocalDateTime(left.dueAt)?.getTime() ?? 0;
-    const rightTime = parseLocalDateTime(right.dueAt)?.getTime() ?? 0;
+    if (left.completed !== right.completed) {
+      return left.completed ? 1 : -1;
+    }
+    const leftTime = parseLocalDateTime(left.startAt ?? left.endAt)?.getTime() ?? 0;
+    const rightTime = parseLocalDateTime(right.startAt ?? right.endAt)?.getTime() ?? 0;
     if (leftTime !== rightTime) {
       return leftTime - rightTime;
     }

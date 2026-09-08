@@ -3,10 +3,15 @@ import assert from "node:assert/strict";
 import {
   clearItems,
   createMemoryBackend,
+  DEFAULT_SETTINGS,
   loadRepository,
+  migrateItems,
   readItems,
+  readSettings,
+  SETTINGS_KEY,
   STORAGE_KEY,
   writeItems,
+  writeSettings,
 } from "../src/core/storage.js";
 
 test("损坏的本地数据会被安全读取为空列表", () => {
@@ -43,4 +48,46 @@ test("仓库支持新增、更新和删除并持久化", () => {
   repo.remove("note-a");
   assert.deepEqual(repo.items(), []);
   assert.deepEqual(readItems(backend), []);
+});
+
+test("旧的单时间待办数据会自动迁移为开始与结束时间", () => {
+  const legacy = [
+    {
+      id: "todo-old",
+      kind: "todo",
+      text: "旧待办",
+      dueAt: "2026-09-08T18:00",
+      completed: false,
+    },
+    {
+      id: "note-old",
+      kind: "note",
+      title: "旧笔记",
+    },
+  ];
+  const migrated = migrateItems(legacy);
+  assert.equal(migrated[0].startAt, "2026-09-08T18:00");
+  assert.equal(migrated[0].endAt, "2026-09-08T18:00");
+  assert.equal(migrated[0].dueAt, undefined);
+  assert.equal(migrated[1], legacy[1]);
+});
+
+test("设置使用默认值并可读写", () => {
+  const backend = createMemoryBackend();
+  assert.deepEqual(readSettings(backend), DEFAULT_SETTINGS);
+  writeSettings(backend, { noteDateMode: "manual", todoGraceMinutes: 10 });
+  assert.deepEqual(readSettings(backend), {
+    noteDateMode: "manual",
+    todoGraceMinutes: 10,
+  });
+  assert.equal(backend.getItem(SETTINGS_KEY) !== null, true);
+});
+
+test("无效设置会回退到默认值并限制范围", () => {
+  const backend = createMemoryBackend(
+    JSON.stringify({ noteDateMode: "invalid", todoGraceMinutes: 9999 }),
+  );
+  const settings = readSettings(backend);
+  assert.equal(settings.noteDateMode, "auto");
+  assert.equal(settings.todoGraceMinutes, 1440);
 });
