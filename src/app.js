@@ -1,5 +1,6 @@
 import { CATEGORY_KEYS, CATEGORY_LABELS, categoryLabel } from "./core/categories.js";
 import { createNote, filterNotes, sortNotes, updateNote } from "./core/notes.js";
+import { listForRange, summarizeItems } from "./core/stats.js";
 import { loadRepository } from "./core/storage.js";
 import {
   createTodo,
@@ -221,6 +222,87 @@ function renderTodosView() {
   `;
 }
 
+function itemTypeLabel(item) {
+  return item.kind === "note" ? "笔记" : "待办";
+}
+
+function itemSummary(item) {
+  if (item.kind === "note") {
+    return item.content;
+  }
+  return item.completed ? `已完成 · ${dueLabel(item.dueAt)}` : `截止 ${dueLabel(item.dueAt)}`;
+}
+
+function renderMineView() {
+  if (state.mineSection === "settings") {
+    return `
+      <div class="view mine-view" data-testid="mine-view">
+        <div class="section-tabs" role="tablist" aria-label="我的二级导航">
+          <button class="section-tab" type="button" data-action="mine-section" data-section="creations">我的创作</button>
+          <button class="section-tab is-active" type="button" data-action="mine-section" data-section="settings">设置</button>
+        </div>
+        <section class="surface-pane settings-pane" data-testid="settings-view">
+          <div class="settings-empty">设置内容将在后续版本补充</div>
+        </section>
+      </div>
+    `;
+  }
+
+  const records = listForRange(repository.items(), state.range);
+  const stats = summarizeItems(records);
+  const rangeName = state.range === "month" ? "本月创作" : "全部创作";
+  const rows = records.length
+    ? records
+        .map(
+          (item) => `
+            <button class="timeline-item" type="button" data-action="open-content" data-id="${item.id}" data-kind="${item.kind}">
+              <span class="timeline-type">${itemTypeLabel(item)}</span>
+              <span class="timeline-copy">
+                <strong>${escapeHtml(item.title ?? item.text)}</strong>
+                <span class="timeline-summary">${escapeHtml(itemSummary(item))}</span>
+              </span>
+              <span class="timeline-date">${escapeHtml(item.kind === "note" ? item.date : item.dueAt.slice(0, 10))}</span>
+            </button>
+          `,
+        )
+        .join("")
+    : '<div class="empty-state">当前范围没有内容</div>';
+
+  return `
+    <div class="view mine-view" data-testid="mine-view">
+      <div class="section-tabs" role="tablist" aria-label="我的二级导航">
+        <button class="section-tab is-active" type="button" data-action="mine-section" data-section="creations">我的创作</button>
+        <button class="section-tab" type="button" data-action="mine-section" data-section="settings">设置</button>
+      </div>
+      <div class="range-row">
+        <button class="range-button${state.range === "month" ? " is-active" : ""}" type="button" data-action="set-range" data-range="month">本月创作</button>
+        <button class="range-button${state.range === "all" ? " is-active" : ""}" type="button" data-action="set-range" data-range="all">全部创作</button>
+      </div>
+      <div class="stats-row">
+        <div class="stat-card" data-testid="stat-total">
+          <span class="stat-value">${stats.total}</span>
+          <span class="stat-label">总内容</span>
+        </div>
+        <div class="stat-card" data-testid="stat-notes">
+          <span class="stat-value">${stats.notes}</span>
+          <span class="stat-label">笔记</span>
+        </div>
+        <div class="stat-card" data-testid="stat-todos">
+          <span class="stat-value">${stats.todos}</span>
+          <span class="stat-label">待办</span>
+        </div>
+      </div>
+      <section class="surface-pane timeline-pane">
+        <div class="list-heading">
+          <h2>${rangeName}</h2>
+          <span class="count-badge">${records.length}</span>
+        </div>
+        <div class="scroll-list">${rows}</div>
+      </section>
+    </div>
+  `;
+}
+
 function renderNotesView() {
   const notes = activeNotes();
   const counts = allNoteCounts();
@@ -288,7 +370,7 @@ function render() {
       ? renderNotesView()
       : state.view === "todos"
         ? renderTodosView()
-        : placeholderMarkup("我的");
+        : renderMineView();
   updateNavigation();
 }
 
@@ -438,6 +520,22 @@ function runOverdueCheck({ notify = true } = {}) {
   return result.removed.length;
 }
 
+function openContentItem(id) {
+  const item = repository.items().find((candidate) => candidate.id === id);
+  if (!item) {
+    return;
+  }
+  if (item.kind === "note") {
+    state.view = "notes";
+    state.noteCategory = "all";
+    state.selectedNoteId = item.id;
+  } else {
+    state.view = "todos";
+    state.todoEditingId = item.id;
+  }
+  render();
+}
+
 function selectCategory(category) {
   state.noteCategory = category;
   state.selectedNoteId = null;
@@ -484,6 +582,14 @@ document.addEventListener("click", (event) => {
       deleteTodo(id);
     } else if (action === "toggle-todo") {
       toggleTodo(id);
+    } else if (action === "mine-section") {
+      state.mineSection = actionElement.dataset.section;
+      render();
+    } else if (action === "set-range") {
+      state.range = actionElement.dataset.range;
+      render();
+    } else if (action === "open-content") {
+      openContentItem(id);
     } else if (action === "close-confirm") {
       closeConfirm();
     }
