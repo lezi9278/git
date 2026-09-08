@@ -15,6 +15,7 @@ import {
   sortTodos,
   updateTodo,
 } from "./core/todos.js";
+import { icon } from "./icons.js";
 
 const storageBackend = window.localStorage;
 const repository = loadRepository(storageBackend);
@@ -28,6 +29,8 @@ const state = {
   noteCategory: ["all", ...CATEGORY_KEYS].includes(initialQuery.get("category"))
     ? initialQuery.get("category")
     : "all",
+  categoryMenuOpen: false,
+  editorCategoryOpen: false,
   editor: null,
   returnView: { view: "notes", noteCategory: "all" },
   mineSection: ["creations", "settings"].includes(initialQuery.get("section"))
@@ -44,8 +47,13 @@ const VIEW_NAMES = {
   mine: "我的",
 };
 
+const topbar = document.querySelector("#topbar");
 const pageTitle = document.querySelector("#page-title");
+const pageSubtitle = document.querySelector("#page-subtitle");
 const pageActions = document.querySelector("#page-actions");
+const categoryPopover = document.querySelector("#category-popover");
+const fab = document.querySelector("#fab");
+const bottomTabs = document.querySelector("#bottom-tabs");
 const content = document.querySelector("#content");
 const toast = document.querySelector("#toast");
 const confirmRoot = document.querySelector("#confirm-root");
@@ -120,6 +128,8 @@ function noteDateForSave(existing, form) {
 
 function beginEditor(kind, mode, id = null) {
   state.editor = { kind, mode, id };
+  state.categoryMenuOpen = false;
+  state.editorCategoryOpen = false;
   state.returnView = {
     view: state.view,
     noteCategory: state.noteCategory,
@@ -131,6 +141,8 @@ function beginEditor(kind, mode, id = null) {
 
 function closeEditor() {
   state.editor = null;
+  state.categoryMenuOpen = false;
+  state.editorCategoryOpen = false;
   const returnView = state.returnView;
   state.view = returnView?.view ?? "notes";
   state.noteCategory = returnView?.noteCategory ?? "all";
@@ -149,16 +161,42 @@ function editorTitle() {
   return state.editor.mode === "create" ? "新建待办" : "编辑待办";
 }
 
+function wordCount(value) {
+  return String(value ?? "").replace(/\s/g, "").length;
+}
+
+function compactDateTime(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const pad = (number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function categoryOptionMarkup() {
+  const category = noteFromEditor()?.category ?? "";
+  return CATEGORY_KEYS.map(
+    (key) => `
+      <button
+        class="menu-item${category === key ? " is-active" : ""}"
+        type="button"
+        data-category-option="${key}"
+        aria-pressed="${category === key}"
+      >
+        <span>${CATEGORY_LABELS[key]}</span>
+        ${category === key ? icon("check", "menu-check", 15) : ""}
+      </button>
+    `,
+  ).join("");
+}
+
 function noteFormMarkup() {
   const note = noteFromEditor();
   const title = note?.title ?? "";
   const contentValue = note?.content ?? "";
   const category = note?.category ?? "";
   const date = note?.date ?? toDateKey(new Date());
-  const choices = CATEGORY_KEYS.map(
-    (key) =>
-      `<button type="button" class="choice${category === key ? " is-selected" : ""}" data-category-option="${key}" aria-pressed="${category === key}">${CATEGORY_LABELS[key]}</button>`,
-  ).join("");
   const dateField =
     appSettings.noteDateMode === "manual"
       ? `<div class="field note-date-field" data-testid="note-date-field">
@@ -170,18 +208,27 @@ function noteFormMarkup() {
   return `
     <form class="editor-page-form" data-testid="note-editor-page" data-form="note-editor">
       <input type="hidden" name="category" value="${escapeAttribute(category)}" />
-      <div class="field editor-field">
+      <div class="editor-toolbar">
+        <button class="icon-tool" type="button" data-action="cancel-editor" aria-label="返回">${icon("arrowLeft")}</button>
+        <div class="toolbar-spacer"></div>
+        <button class="icon-tool save-tool" type="submit" aria-label="保存">${icon("check", "", 22)}</button>
+      </div>
+      <div class="editor-main">
         <input id="note-title" name="title" class="title-input" type="text" value="${escapeAttribute(title)}" placeholder="标题" autocomplete="off" aria-label="笔记标题" />
+        <div class="note-meta-line">
+          <span>${escapeHtml(compactDateTime(note?.createdAt ?? new Date().toISOString()))}</span>
+          <span>|</span>
+          <span data-word-count>${wordCount(contentValue)}字</span>
+          <span>|</span>
+          <button class="meta-category" type="button" data-action="toggle-editor-category">
+            <span class="category-name">${category ? categoryLabel(category) : "未分类"}</span>${icon("chevronDown", "tiny-chevron", 13)}
+          </button>
+        </div>
+        <div class="small-menu" data-testid="editor-category-menu" ${state.editorCategoryOpen ? "" : "hidden"}>${categoryOptionMarkup()}</div>
+        <textarea id="note-content" name="content" placeholder="正文" spellcheck="false" aria-label="笔记内容">${escapeHtml(contentValue)}</textarea>
+        ${dateField}
+        <p class="error-text" data-form-errors aria-live="polite"></p>
       </div>
-      <div class="field editor-field editor-content-field">
-        <textarea id="note-content" name="content" placeholder="写下你的想法" spellcheck="false" aria-label="笔记内容">${escapeHtml(contentValue)}</textarea>
-      </div>
-      <div class="field editor-field">
-        <div class="choice-row" role="radiogroup" aria-label="笔记分类">${choices}</div>
-      </div>
-      ${dateField}
-      <p class="error-text" data-form-errors aria-live="polite"></p>
-      <button class="button primary editor-submit" type="submit">${state.editor.mode === "create" ? "保存笔记" : "保存修改"}</button>
     </form>
   `;
 }
@@ -193,22 +240,25 @@ function todoFormMarkup() {
   const endAt = todo?.endAt ?? "";
   return `
     <form class="editor-page-form" data-testid="todo-editor-page" data-form="todo-editor">
-      <div class="field editor-field">
-        <label for="todo-text">待办内容</label>
-        <input id="todo-text" name="text" type="text" value="${escapeAttribute(text)}" placeholder="要完成的事情" autocomplete="off" />
+      <div class="editor-toolbar">
+        <button class="icon-tool" type="button" data-action="cancel-editor" aria-label="返回">${icon("arrowLeft")}</button>
+        <div class="toolbar-spacer"></div>
+        <button class="icon-tool save-tool" type="submit" aria-label="保存">${icon("check", "", 22)}</button>
       </div>
-      <div class="time-grid">
-        <div class="field editor-field">
-          <label for="todo-start">开始时间</label>
-          <input id="todo-start" name="startAt" type="datetime-local" step="60" value="${escapeAttribute(startAt)}" />
+      <div class="editor-main">
+        <input id="todo-text" name="text" class="title-input" type="text" value="${escapeAttribute(text)}" placeholder="待办内容" autocomplete="off" />
+        <div class="todo-time-fields">
+          <label>
+            <span>开始时间</span>
+            <input name="startAt" type="datetime-local" step="60" value="${escapeAttribute(startAt)}" />
+          </label>
+          <label>
+            <span>结束时间</span>
+            <input name="endAt" type="datetime-local" step="60" value="${escapeAttribute(endAt)}" />
+          </label>
         </div>
-        <div class="field editor-field">
-          <label for="todo-end">结束时间</label>
-          <input id="todo-end" name="endAt" type="datetime-local" step="60" value="${escapeAttribute(endAt)}" />
-        </div>
+        <p class="error-text" data-form-errors aria-live="polite"></p>
       </div>
-      <p class="error-text" data-form-errors aria-live="polite"></p>
-      <button class="button primary editor-submit" type="submit">${state.editor.mode === "create" ? "添加待办" : "保存修改"}</button>
     </form>
   `;
 }
@@ -219,57 +269,36 @@ function renderEditor() {
   }
   return `
     <div class="view editor-scroll view-enter" data-testid="editor-view">
-      <div class="editor-shell">
-        <header class="editor-heading">
-          <h2>${editorTitle()}</h2>
-        </header>
-        ${state.editor.kind === "note" ? noteFormMarkup() : todoFormMarkup()}
-      </div>
+      ${state.editor.kind === "note" ? noteFormMarkup() : todoFormMarkup()}
     </div>
   `;
 }
 
 function renderNotesView() {
   const notes = activeNotes();
-  const counts = allNoteCounts();
-  const categories = [
-    { key: "all", label: "全部", count: counts.all },
-    ...CATEGORY_KEYS.map((key) => ({
-      key,
-      label: CATEGORY_LABELS[key],
-      count: counts[key],
-    })),
-  ];
-  const chips = categories
-    .map(
-      (category) =>
-        `<button type="button" class="filter-chip${state.noteCategory === category.key ? " is-active" : ""}" data-category-filter="${category.key}" aria-pressed="${state.noteCategory === category.key}">${category.label}<span class="count">${category.count}</span></button>`,
-    )
-    .join("");
-  const cards = notes.length
+  const rows = notes.length
     ? notes
         .map(
           (note) => `
-            <article class="note-card note-${escapeAttribute(note.category)}" data-testid="note-item" data-note-id="${note.id}">
-              <button class="note-card-main" type="button" data-action="open-note" data-id="${note.id}">
-                <div class="note-card-head">
-                  <span class="category-dot"></span>
-                  <h3>${escapeHtml(note.title)}</h3>
-                  <time datetime="${escapeAttribute(note.date)}">${escapeHtml(note.date)}</time>
-                </div>
+            <article class="list-row" data-testid="note-item" data-note-id="${note.id}">
+              <button class="row-main" type="button" data-action="open-note" data-id="${note.id}">
+                <h2>${escapeHtml(note.title)}</h2>
                 <p>${escapeHtml(note.content)}</p>
+                <div class="row-meta">
+                  <span>${escapeHtml(note.date)}</span>
+                  <span>${categoryLabel(note.category)}</span>
+                </div>
               </button>
-              <button class="delete-button" type="button" data-action="delete-note" data-id="${note.id}" aria-label="删除笔记">删除</button>
+              <button class="row-delete" type="button" data-action="delete-note" data-id="${note.id}" aria-label="删除笔记">${icon("trash", "", 17)}</button>
             </article>
           `,
         )
         .join("")
-    : '<div class="empty-state soft">还没有笔记</div>';
+    : '<div class="empty-state">还没有笔记</div>';
 
   return `
-    <div class="view collection-view view-enter" data-testid="notes-list-view">
-      <div class="category-bar">${chips}</div>
-      <div class="card-grid note-grid">${cards}</div>
+    <div class="view plain-list-page view-enter" data-testid="notes-list-view">
+      <div class="plain-list">${rows}</div>
     </div>
   `;
 }
@@ -285,12 +314,12 @@ function renderTodoRows() {
       .filter((item) => item.kind === "todo"),
   );
   if (!todos.length) {
-    return '<div class="empty-state soft">还没有待办</div>';
+    return '<div class="empty-state">还没有待办</div>';
   }
   return todos
     .map(
       (todo) => `
-        <article class="todo-card${todo.completed ? " is-completed" : ""}" data-testid="todo-item" data-todo-id="${todo.id}">
+        <article class="list-row todo-row${todo.completed ? " is-completed" : ""}" data-testid="todo-item" data-todo-id="${todo.id}">
           <button
             class="todo-check${todo.completed ? " is-done" : ""}"
             type="button"
@@ -298,11 +327,11 @@ function renderTodoRows() {
             data-id="${todo.id}"
             aria-label="${todo.completed ? "取消完成" : "标记完成"}"
           ></button>
-          <button class="todo-card-main" type="button" data-action="open-todo" data-id="${todo.id}">
+          <button class="row-main" type="button" data-action="open-todo" data-id="${todo.id}">
             <span class="todo-text">${escapeHtml(todo.text)}</span>
-            <time>${escapeHtml(timeRangeLabel(todo))}</time>
+            <time>${escapeHtml(formatLocalDateTime(todo.startAt))} 至 ${escapeHtml(formatLocalDateTime(todo.endAt))}</time>
           </button>
-          <button class="delete-button" type="button" data-action="delete-todo" data-id="${todo.id}" aria-label="删除待办">删除</button>
+          <button class="row-delete" type="button" data-action="delete-todo" data-id="${todo.id}" aria-label="删除待办">${icon("trash", "", 17)}</button>
           <span class="status-foot ${todo.completed ? "done" : "open"}">${todo.completed ? "已完成" : "未完成"}</span>
         </article>
       `,
@@ -312,11 +341,8 @@ function renderTodoRows() {
 
 function renderTodosView() {
   return `
-    <div class="view collection-view view-enter" data-testid="todos-list-view">
-      <div class="section-heading-row">
-        <span>全部待办</span>
-      </div>
-      <div class="todo-list">${renderTodoRows()}</div>
+    <div class="view plain-list-page view-enter" data-testid="todos-list-view">
+      <div class="plain-list">${renderTodoRows()}</div>
     </div>
   `;
 }
@@ -436,16 +462,109 @@ function renderMineView() {
   `;
 }
 
+function titleCategoryName(category) {
+  return category === "all" ? "全部" : CATEGORY_LABELS[category] ?? "全部";
+}
+
+function renderTopbar() {
+  const composing = Boolean(state.editor);
+  topbar.hidden = composing;
+  pageActions.innerHTML = "";
+  if (composing) {
+    return;
+  }
+  if (state.view === "notes") {
+    const notes = repository.items().filter((item) => item.kind === "note");
+    const counts = allNoteCounts();
+    pageTitle.innerHTML = `
+      <button class="title-dropdown" type="button" data-action="category-menu" aria-expanded="${state.categoryMenuOpen}">
+        <span>${titleCategoryName(state.noteCategory)}</span>
+        ${icon("chevronDown", "title-chevron", 16)}
+      </button>
+    `;
+    pageSubtitle.textContent = `${notes.length} 篇笔记`;
+    const categories = [
+      { key: "all", label: "全部", count: counts.all },
+      ...CATEGORY_KEYS.map((key) => ({
+        key,
+        label: CATEGORY_LABELS[key],
+        count: counts[key],
+      })),
+    ];
+    categoryPopover.innerHTML = categories
+      .map(
+        (category) => `
+          <button
+            class="menu-item${state.noteCategory === category.key ? " is-active" : ""}"
+            type="button"
+            data-category-filter="${category.key}"
+            aria-pressed="${state.noteCategory === category.key}"
+          >
+            <span>${category.label}</span>
+            <small>${category.count}</small>
+            ${state.noteCategory === category.key ? icon("check", "menu-check", 15) : ""}
+          </button>
+        `,
+      )
+      .join("");
+    categoryPopover.hidden = !state.categoryMenuOpen;
+    return;
+  }
+
+  const count =
+    state.view === "todos"
+      ? repository.items().filter((item) => item.kind === "todo").length
+      : 0;
+  pageTitle.textContent = VIEW_NAMES[state.view];
+  pageSubtitle.textContent =
+    state.view === "todos"
+      ? `${count} 条待办`
+      : state.mineSection === "settings"
+        ? "偏好设置"
+        : "创作记录";
+  categoryPopover.hidden = true;
+}
+
+function renderFab() {
+  const showFab = !state.editor && (state.view === "notes" || state.view === "todos");
+  fab.hidden = !showFab;
+  if (!showFab) {
+    return;
+  }
+  const action = state.view === "notes" ? "new-note" : "new-todo";
+  fab.dataset.action = action;
+  fab.setAttribute("aria-label", state.view === "notes" ? "新建笔记" : "新建待办");
+  fab.innerHTML = icon("plus", "", 28);
+}
+
+function renderBottomTabs() {
+  const tabs = [
+    { view: "notes", label: "笔记", iconName: "fileText" },
+    { view: "todos", label: "待办", iconName: "listChecks" },
+    { view: "mine", label: "我的", iconName: "user" },
+  ];
+  bottomTabs.innerHTML = tabs
+    .map(
+      (tab) => `
+        <button
+          class="tab-item${state.view === tab.view ? " is-active" : ""}"
+          type="button"
+          data-view="${tab.view}"
+          ${state.view === tab.view ? 'aria-current="page"' : ""}
+        >
+          <span class="tab-icon">${icon(tab.iconName, "", 21)}</span>
+          <span>${tab.label}</span>
+        </button>
+      `,
+    )
+    .join("");
+}
+
 function render() {
   const composing = Boolean(state.editor);
-  pageTitle.textContent = composing ? editorTitle() : VIEW_NAMES[state.view];
-  pageActions.innerHTML = composing
-    ? '<button class="back-button" type="button" data-action="cancel-editor">返回</button>'
-    : state.view === "notes"
-      ? '<button class="button primary" type="button" data-action="new-note">新建笔记</button>'
-      : state.view === "todos"
-        ? '<button class="button primary" type="button" data-action="new-todo">新建待办</button>'
-        : "";
+  renderTopbar();
+  renderFab();
+  renderBottomTabs();
   content.innerHTML = composing
     ? renderEditor()
     : state.view === "notes"
@@ -630,6 +749,7 @@ function selectView(view) {
     return;
   }
   state.editor = null;
+  state.categoryMenuOpen = false;
   state.view = view;
   render();
 }
@@ -652,12 +772,23 @@ document.addEventListener("click", (event) => {
     if (hiddenInput) {
       hiddenInput.value = categoryOption.dataset.categoryOption;
     }
+    const nameElement = document.querySelector(".category-name");
+    if (nameElement) {
+      nameElement.textContent = categoryLabel(categoryOption.dataset.categoryOption);
+    }
+    const menu = document.querySelector(".small-menu");
+    if (menu) {
+      menu.hidden = true;
+    }
+    state.editorCategoryOpen = false;
+    state.categoryMenuOpen = false;
     return;
   }
 
   const categoryFilter = event.target.closest("[data-category-filter]");
   if (categoryFilter) {
     state.noteCategory = categoryFilter.dataset.categoryFilter;
+    state.categoryMenuOpen = false;
     render();
     return;
   }
@@ -684,6 +815,17 @@ document.addEventListener("click", (event) => {
     toggleTodo(id);
   } else if (action === "cancel-editor") {
     closeEditor();
+  } else if (action === "category-menu") {
+    state.categoryMenuOpen = !state.categoryMenuOpen;
+    render();
+    return;
+  } else if (action === "toggle-editor-category") {
+    const menu = document.querySelector(".small-menu");
+    if (menu) {
+      menu.hidden = !menu.hidden;
+      state.editorCategoryOpen = !menu.hidden;
+    }
+    return;
   } else if (action === "mine-section") {
     state.mineSection = actionElement.dataset.section;
     render();
@@ -699,6 +841,11 @@ document.addEventListener("click", (event) => {
     showToast(mode === "manual" ? "笔记日期已改为手动填写" : "笔记日期已改为自动获取");
   } else if (action === "close-confirm") {
     closeConfirm();
+  }
+
+  if (state.categoryMenuOpen && !event.target.closest(".title-block")) {
+    state.categoryMenuOpen = false;
+    render();
   }
 });
 
@@ -725,6 +872,17 @@ document.addEventListener("submit", (event) => {
     updateAppSettings({ todoGraceMinutes: minutes });
     render();
     showToast(`待办过期等待已设为 ${minutes} 分钟`);
+  }
+});
+
+document.addEventListener("input", (event) => {
+  const textarea = event.target.closest('textarea[name="content"]');
+  if (!textarea) {
+    return;
+  }
+  const counter = document.querySelector("[data-word-count]");
+  if (counter) {
+    counter.textContent = `${wordCount(textarea.value)}字`;
   }
 });
 

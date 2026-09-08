@@ -2,30 +2,26 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>本地笔记与待办</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="app-shell">
-      <aside class="sidebar" aria-label="主导航">
-        <div class="brand">
-          <span class="brand-mark" aria-hidden="true">记</span>
-          <span class="brand-text">本地笔记</span>
-        </div>
-        <nav class="primary-nav">
-          <button class="nav-item" type="button" data-view="notes">笔记</button>
-          <button class="nav-item" type="button" data-view="todos">待办</button>
-          <button class="nav-item" type="button" data-view="mine">我的</button>
-        </nav>
-      </aside>
-      <main class="main-area">
-        <header class="page-header">
+    <div id="app-root" class="app-root">
+      <header id="topbar" class="topbar">
+        <div class="title-block">
           <h1 id="page-title">笔记</h1>
-          <div id="page-actions" class="page-actions"></div>
-        </header>
-        <section id="content" class="content" aria-live="polite"></section>
-      </main>
+          <p id="page-subtitle"></p>
+          <div id="category-popover" class="category-popover" hidden></div>
+        </div>
+        <div id="page-actions" class="top-actions"></div>
+      </header>
+
+      <main id="content" class="content"></main>
+
+      <button id="fab" class="fab" type="button" hidden></button>
+
+      <nav id="bottom-tabs" class="bottom-tabs" aria-label="主导航"></nav>
     </div>
 
     <div id="confirm-root" class="modal-backdrop" hidden>
