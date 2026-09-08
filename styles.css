@@ -546,7 +546,7 @@ textarea:focus-visible {
 
 .settings-empty {
   display: grid;
-  min-height: 100%;
+  flex: 1 1 auto;
   place-items: center;
   color: var(--text-muted);
 }

@@ -12,13 +12,22 @@ import {
 
 const repository = loadRepository(window.localStorage);
 
+const initialQuery = new URLSearchParams(window.location.search);
 const state = {
-  view: "notes",
-  noteCategory: "all",
+  view: ["notes", "todos", "mine"].includes(initialQuery.get("view"))
+    ? initialQuery.get("view")
+    : "notes",
+  noteCategory: ["all", ...CATEGORY_KEYS].includes(initialQuery.get("category"))
+    ? initialQuery.get("category")
+    : "all",
   selectedNoteId: null,
   todoEditingId: null,
-  mineSection: "creations",
-  range: "month",
+  mineSection: ["creations", "settings"].includes(initialQuery.get("section"))
+    ? initialQuery.get("section")
+    : "creations",
+  range: ["month", "all"].includes(initialQuery.get("range"))
+    ? initialQuery.get("range")
+    : "month",
 };
 
 const pageTitle = document.querySelector("#page-title");
@@ -372,6 +381,25 @@ function render() {
         ? renderTodosView()
         : renderMineView();
   updateNavigation();
+  syncLocation();
+}
+
+function syncLocation() {
+  const params = new URLSearchParams();
+  if (state.view !== "notes") {
+    params.set("view", state.view);
+  }
+  if (state.noteCategory !== "all") {
+    params.set("category", state.noteCategory);
+  }
+  if (state.mineSection !== "creations") {
+    params.set("section", state.mineSection);
+  }
+  if (state.range !== "month") {
+    params.set("range", state.range);
+  }
+  const query = params.toString();
+  history.replaceState(null, "", query ? `${location.pathname}?${query}` : location.pathname);
 }
 
 function updateNavigation() {
