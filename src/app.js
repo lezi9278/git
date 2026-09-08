@@ -1,6 +1,13 @@
 import { CATEGORY_KEYS, CATEGORY_LABELS, categoryLabel } from "./core/categories.js";
 import { createNote, filterNotes, sortNotes, updateNote } from "./core/notes.js";
 import { loadRepository } from "./core/storage.js";
+import {
+  createTodo,
+  purgeOverdueTodos,
+  setTodoCompleted,
+  sortTodos,
+  updateTodo,
+} from "./core/todos.js";
 
 const repository = loadRepository(window.localStorage);
 
@@ -116,6 +123,104 @@ function noteFormMarkup(note) {
   `;
 }
 
+function todoFormMarkup(todo) {
+  const isEditing = Boolean(todo);
+  const text = todo?.text ?? "";
+  const dueAt = todo?.dueAt ?? "";
+  const cancelButton = isEditing
+    ? '<button class="button" type="button" data-action="cancel-todo">取消编辑</button>'
+    : "";
+  return `
+    <form class="todo-composer" data-testid="todo-editor" data-form="todo-editor">
+      <div class="editor-head">
+        <h2 data-testid="todo-composer-title">${isEditing ? "编辑待办" : "新建待办"}</h2>
+      </div>
+      <div class="todo-composer-body">
+        <div class="field">
+          <label for="todo-text">待办内容</label>
+          <input id="todo-text" name="text" type="text" value="${escapeAttribute(text)}" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label for="todo-due">日期时间</label>
+          <input id="todo-due" name="dueAt" type="datetime-local" step="60" value="${escapeAttribute(dueAt)}" />
+        </div>
+        <button class="button primary" type="submit">${isEditing ? "保存修改" : "添加待办"}</button>
+        ${cancelButton}
+      </div>
+      <div class="todo-error-row">
+        <p class="error-text" data-form-errors aria-live="polite"></p>
+      </div>
+    </form>
+  `;
+}
+
+function dueLabel(dueAt) {
+  return dueAt.replace("T", " ");
+}
+
+function renderTodoRows(todos, completed) {
+  if (!todos.length) {
+    return `<div class="empty-state">${completed ? "暂无已完成待办" : "暂无未完成待办"}</div>`;
+  }
+  return todos
+    .map(
+      (todo) => `
+        <div class="todo-row${todo.completed ? " is-completed" : ""}" data-testid="todo-item" data-todo-id="${todo.id}">
+          <button
+            class="todo-check${todo.completed ? " is-done" : ""}"
+            type="button"
+            data-action="toggle-todo"
+            data-id="${todo.id}"
+            aria-label="${todo.completed ? "取消完成" : "标记完成"}"
+          ></button>
+          <div class="todo-copy">
+            <p class="todo-text">${escapeHtml(todo.text)}</p>
+            <time datetime="${escapeAttribute(todo.dueAt)}">${escapeHtml(dueLabel(todo.dueAt))}</time>
+          </div>
+          <button class="icon-button" type="button" data-action="edit-todo" data-id="${todo.id}" aria-label="编辑待办">编</button>
+          <button class="icon-button" type="button" data-action="delete-todo" data-id="${todo.id}" aria-label="删除待办">删</button>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function renderTodosView() {
+  const todos = repository
+    .items()
+    .filter((item) => item.kind === "todo");
+  const uncompleted = sortTodos(todos.filter((todo) => !todo.completed));
+  const completed = sortTodos(todos.filter((todo) => todo.completed)).reverse();
+  const editingTodo =
+    state.todoEditingId
+      ? todos.find((todo) => todo.id === state.todoEditingId) ?? null
+      : null;
+
+  return `
+    <div class="view todos-view" data-testid="todos-view">
+      <div class="todos-layout">
+        ${todoFormMarkup(editingTodo)}
+        <div class="todo-lists">
+          <section class="surface-pane todo-list-pane" data-testid="todo-pending">
+            <div class="list-heading">
+              <h2>未完成</h2>
+              <span class="count-badge">${uncompleted.length}</span>
+            </div>
+            <div class="scroll-list">${renderTodoRows(uncompleted, false)}</div>
+          </section>
+          <section class="surface-pane todo-list-pane" data-testid="todo-completed">
+            <div class="list-heading">
+              <h2>已完成</h2>
+              <span class="count-badge">${completed.length}</span>
+            </div>
+            <div class="scroll-list">${renderTodoRows(completed, true)}</div>
+          </section>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderNotesView() {
   const notes = activeNotes();
   const counts = allNoteCounts();
@@ -182,7 +287,7 @@ function render() {
     state.view === "notes"
       ? renderNotesView()
       : state.view === "todos"
-        ? placeholderMarkup("待办")
+        ? renderTodosView()
         : placeholderMarkup("我的");
   updateNavigation();
 }
@@ -262,6 +367,77 @@ function saveNoteFromForm(form) {
   }
 }
 
+function saveTodoFromForm(form) {
+  const draft = {
+    text: form.elements.text.value,
+    dueAt: form.elements.dueAt.value,
+  };
+  try {
+    const existing = state.todoEditingId
+      ? repository.items().find((item) => item.id === state.todoEditingId && item.kind === "todo")
+      : null;
+    const saved = existing ? updateTodo(existing, draft) : createTodo(draft);
+    repository.upsert(saved);
+    state.todoEditingId = null;
+    const removedCount = runOverdueCheck({ notify: false });
+    if (removedCount > 0) {
+      showToast(`已自动清理 ${removedCount} 条过期未完成待办`);
+    } else {
+      render();
+      showToast(existing ? "待办已更新" : "待办已添加");
+    }
+  } catch (error) {
+    const errorElement = form.querySelector("[data-form-errors]");
+    errorElement.textContent = error.validation?.join("；") ?? "保存失败，请检查填写内容";
+  }
+}
+
+function deleteTodo(id) {
+  const todo = repository.items().find((item) => item.id === id && item.kind === "todo");
+  if (!todo) {
+    return;
+  }
+  showConfirm(
+    {
+      title: "删除待办",
+      detail: `将删除“${todo.text}”，此操作无法恢复。`,
+      actionLabel: "删除",
+    },
+    () => {
+      repository.remove(id);
+      if (state.todoEditingId === id) {
+        state.todoEditingId = null;
+      }
+      render();
+      showToast("待办已删除");
+    },
+  );
+}
+
+function toggleTodo(id) {
+  const todo = repository.items().find((item) => item.id === id && item.kind === "todo");
+  if (!todo) {
+    return;
+  }
+  const updated = setTodoCompleted(todo, !todo.completed);
+  repository.upsert(updated);
+  render();
+  showToast(updated.completed ? "已标记完成" : "已取消完成");
+}
+
+function runOverdueCheck({ notify = true } = {}) {
+  const result = purgeOverdueTodos(repository.items(), new Date());
+  if (!result.removed.length) {
+    return 0;
+  }
+  repository.replace(result.remaining);
+  render();
+  if (notify) {
+    showToast(`已自动清理 ${result.removed.length} 条过期未完成待办`);
+  }
+  return result.removed.length;
+}
+
 function selectCategory(category) {
   state.noteCategory = category;
   state.selectedNoteId = null;
@@ -298,6 +474,16 @@ document.addEventListener("click", (event) => {
     } else if (action === "cancel-note") {
       state.selectedNoteId = null;
       render();
+    } else if (action === "edit-todo") {
+      state.todoEditingId = id;
+      render();
+    } else if (action === "cancel-todo") {
+      state.todoEditingId = null;
+      render();
+    } else if (action === "delete-todo") {
+      deleteTodo(id);
+    } else if (action === "toggle-todo") {
+      toggleTodo(id);
     } else if (action === "close-confirm") {
       closeConfirm();
     }
@@ -325,12 +511,17 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("submit", (event) => {
-  const form = event.target.closest("[data-form='note-editor']");
-  if (!form) {
+  const noteForm = event.target.closest("[data-form='note-editor']");
+  if (noteForm) {
+    event.preventDefault();
+    saveNoteFromForm(noteForm);
     return;
   }
-  event.preventDefault();
-  saveNoteFromForm(form);
+  const todoForm = event.target.closest("[data-form='todo-editor']");
+  if (todoForm) {
+    event.preventDefault();
+    saveTodoFromForm(todoForm);
+  }
 });
 
 confirmAction.addEventListener("click", () => {
@@ -347,3 +538,7 @@ confirmRoot.addEventListener("click", (event) => {
 });
 
 render();
+runOverdueCheck();
+setInterval(() => {
+  runOverdueCheck();
+}, 30000);

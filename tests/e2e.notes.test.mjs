@@ -80,7 +80,7 @@ test("应用外壳与笔记模块浏览器流程", async (t) => {
   );
 
   await page.locator('[data-view="todos"]').click();
-  await page.locator('[data-testid="待办-placeholder"]').waitFor();
+  await page.locator('[data-testid="todos-view"]').waitFor();
   await page.locator('[data-view="mine"]').click();
   await page.locator('[data-testid="我的-placeholder"]').waitFor();
 });
