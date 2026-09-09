@@ -681,6 +681,7 @@ function renderMineView() {
             <li>新增：笔记支持自定义分类，可在设置中添加、重命名和删除分类。</li>
             <li>新增：编辑笔记支持加粗、斜体、下划线、字号、字体、颜色与对齐。</li>
             <li>新增：外观设置中可配置默认字体、字号与颜色。</li>
+            <li>修改：应用更名为「乐乐笔记」。</li>
           </ul>
           <h3 class="version-subtitle">第二版</h3>
           <ul class="version-list">

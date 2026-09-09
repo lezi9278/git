@@ -1,6 +1,6 @@
 {
   "name": "local-notes",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -18,7 +18,7 @@
   },
   "build": {
     "appId": "com.lezi9278.local-notes",
-    "productName": "本地笔记与待办",
+    "productName": "乐乐笔记",
     "directories": {
       "output": "dist"
     },
