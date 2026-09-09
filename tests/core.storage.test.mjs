@@ -137,3 +137,26 @@ test("合法的自定义分类会被保留", () => {
     { key: "cat-1", label: "工作" },
   ]);
 });
+
+test("编辑默认字体、字号与颜色设置会被校验和限制", () => {
+  const validBackend = createMemoryBackend(
+    JSON.stringify({ editorFontFamily: "kaiti", editorFontSize: 20, editorColor: "red" }),
+  );
+  const valid = readSettings(validBackend);
+  assert.equal(valid.editorFontFamily, "kaiti");
+  assert.equal(valid.editorFontSize, 20);
+  assert.equal(valid.editorColor, "red");
+
+  const invalidBackend = createMemoryBackend(
+    JSON.stringify({ editorFontFamily: "comic", editorFontSize: 99, editorColor: "pink" }),
+  );
+  const invalid = readSettings(invalidBackend);
+  assert.equal(invalid.editorFontFamily, "default");
+  assert.equal(invalid.editorFontSize, 32);
+  assert.equal(invalid.editorColor, "ink");
+
+  const fallback = readSettings(createMemoryBackend());
+  assert.equal(fallback.editorFontFamily, "default");
+  assert.equal(fallback.editorFontSize, 17);
+  assert.equal(fallback.editorColor, "ink");
+});

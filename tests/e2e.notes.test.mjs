@@ -33,7 +33,7 @@ test("第二版笔记列表、独立编辑页与分类流程", async (t) => {
   assert.equal(await page.locator("[data-word-count]").textContent(), "0字");
 
   await page.locator('input[name="title"]').fill("第一次整理");
-  await page.locator('textarea[name="content"]').fill("把一段零散思考整理成完整记录。");
+  await page.locator('[data-testid="note-content-editor"]').fill("把一段零散思考整理成完整记录。");
   assert.notEqual(await page.locator("[data-word-count]").textContent(), "0字");
   await page.locator('[data-action="toggle-editor-category"]').click();
   await page.locator('[data-testid="editor-category-menu"]').waitFor();
@@ -50,7 +50,7 @@ test("第二版笔记列表、独立编辑页与分类流程", async (t) => {
   assert.equal(await page.locator('input[name="title"]').inputValue(), "第一次整理");
   assert.equal(await page.locator('[data-testid="note-date-field"]').count(), 0);
   await page.locator('input[name="title"]').fill("第一次整理（已修改）");
-  await page.locator('textarea[name="content"]').fill("修改后的正文。");
+  await page.locator('[data-testid="note-content-editor"]').fill("修改后的正文。");
   await page.locator('[data-action="toggle-editor-category"]').click();
   await page.locator('[data-testid="editor-category-menu"]').waitFor();
   await page.locator('[data-category-option="thinking"]').click();

@@ -1,5 +1,6 @@
 import { CATEGORY_KEYS } from "./categories.js";
 import { isValidDateKey } from "./time.js";
+import { sanitizeRichText, stripHtml } from "./richtext.js";
 
 export function makeId(prefix) {
   const randomPart =
@@ -12,13 +13,14 @@ export function makeId(prefix) {
 export function validateNoteDraft(draft, categoryKeys = CATEGORY_KEYS) {
   const title = typeof draft.title === "string" ? draft.title.trim() : "";
   const content = typeof draft.content === "string" ? draft.content.trim() : "";
+  const visibleContent = draft.richText === true ? stripHtml(content) : content;
   const category = draft.category;
   const date = draft.date;
   const errors = [];
   if (!title) {
     errors.push("标题不能为空");
   }
-  if (!content) {
+  if (!visibleContent) {
     errors.push("内容不能为空");
   }
   if (!categoryKeys.includes(category)) {
@@ -38,11 +40,13 @@ export function createNote(draft, now = new Date(), categoryKeys = CATEGORY_KEYS
     throw error;
   }
   const timestamp = now.toISOString();
+  const richText = draft.richText === true;
   return {
     id: makeId("note"),
     kind: "note",
     title: draft.title.trim(),
-    content: draft.content.trim(),
+    content: richText ? sanitizeRichText(draft.content) : draft.content.trim(),
+    richText,
     category: draft.category,
     date: draft.date,
     createdAt: timestamp,
@@ -57,11 +61,13 @@ export function updateNote(note, draft, now = new Date(), categoryKeys = CATEGOR
     error.validation = result.errors;
     throw error;
   }
+  const richText = draft.richText === true;
   return {
     ...note,
     kind: "note",
     title: draft.title.trim(),
-    content: draft.content.trim(),
+    content: richText ? sanitizeRichText(draft.content) : draft.content.trim(),
+    richText,
     category: draft.category,
     date: draft.date,
     updatedAt: now.toISOString(),

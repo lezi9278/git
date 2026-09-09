@@ -4,9 +4,12 @@ import {
   categoryLabelIn,
 } from "./core/categories.js";
 import { createNote, filterNotes, makeId, searchNotes, sortNotes, updateNote } from "./core/notes.js";
+import { plainTextToRichHtml, sanitizeRichText, stripHtml } from "./core/richtext.js";
 import { listForRange, summarizeItems } from "./core/stats.js";
 import {
   DEFAULT_SETTINGS,
+  EDITOR_COLORS,
+  EDITOR_FONT_FAMILIES,
   loadRepository,
   readSettings,
   writeSettings,
@@ -57,6 +60,40 @@ const VIEW_NAMES = {
   todos: "待办",
   mine: "我的",
 };
+
+const FONT_STACKS = {
+  default: "",
+  songti: "Songti SC, SimSun, serif",
+  heiti: "SimHei, Heiti SC, Microsoft YaHei, sans-serif",
+  kaiti: "Kaiti SC, KaiTi, STKaiti, serif",
+  mono: "ui-monospace, Consolas, monospace",
+};
+
+const FONT_FAMILY_LABELS = {
+  default: "系统默认",
+  songti: "宋体",
+  heiti: "黑体",
+  kaiti: "楷体",
+  mono: "等宽",
+};
+
+const EDITOR_COLOR_VALUES = {
+  ink: "var(--ink)",
+  gray: "#6b6b6b",
+  red: "#d33122",
+  green: "#2e7d32",
+  blue: "#1a56b0",
+};
+
+const COLOR_LABELS = {
+  ink: "墨色",
+  gray: "灰色",
+  red: "红色",
+  green: "绿色",
+  blue: "蓝色",
+};
+
+const EDITOR_FONT_SIZES = [15, 17, 20, 24, 28];
 
 const topbar = document.querySelector("#topbar");
 const pageTitle = document.querySelector("#page-title");
@@ -224,10 +261,135 @@ function categoryOptionMarkup() {
     .join("");
 }
 
+function richContentForEditor(note) {
+  if (!note) {
+    return "";
+  }
+  return note.richText
+    ? sanitizeRichText(note.content)
+    : plainTextToRichHtml(note.content ?? "");
+}
+
+function notePreviewText(note) {
+  const text = note.richText ? stripHtml(note.content) : String(note.content ?? "");
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function editorDefaultStyle() {
+  const fontStack = FONT_STACKS[appSettings.editorFontFamily] ?? "";
+  const color = EDITOR_COLOR_VALUES[appSettings.editorColor] ?? "var(--ink)";
+  return `font-family: ${fontStack || "inherit"}; font-size: ${appSettings.editorFontSize}px; color: ${color};`;
+}
+
+function runEditorCommand(command) {
+  const editor = document.querySelector('[data-testid="note-content-editor"]');
+  if (!editor) {
+    return;
+  }
+  try {
+    document.execCommand("styleWithCSS", false, "true");
+  } catch {
+    // 旧浏览器忽略，命令仍可用默认标记方式执行
+  }
+  if (!document.execCommand(command, false, null)) {
+    showToast("请先将光标放在正文中");
+  }
+}
+
+function applyInlineFormat(kind, value) {
+  const editor = document.querySelector('[data-testid="note-content-editor"]');
+  if (!editor) {
+    return;
+  }
+  const selection = window.getSelection();
+  if (!selection.rangeCount || selection.isCollapsed || !editor.contains(selection.anchorNode)) {
+    showToast("请先选中要调整的文字");
+    return;
+  }
+  const range = selection.getRangeAt(0);
+  const fragment = range.extractContents();
+  const wrapper = document.createElement("span");
+  if (kind === "size") {
+    wrapper.style.fontSize = `${Number.parseInt(value, 10) || 17}px`;
+  } else if (kind === "family") {
+    const fontStack = FONT_STACKS[value];
+    if (fontStack) {
+      wrapper.style.fontFamily = fontStack;
+    }
+  } else if (kind === "color") {
+    const colorValue = EDITOR_COLOR_VALUES[value];
+    if (colorValue) {
+      wrapper.style.color = colorValue;
+    }
+  } else {
+    return;
+  }
+  wrapper.appendChild(fragment);
+  range.insertNode(wrapper);
+  selection.removeAllRanges();
+  hideFormatMenus();
+}
+
+function hideFormatMenus() {
+  document.querySelectorAll(".format-menu").forEach((menu) => {
+    menu.hidden = true;
+  });
+}
+
+function formatBarMarkup() {
+  const commandButtons = [
+    ["bold", "bold", "加粗"],
+    ["italic", "italic", "斜体"],
+    ["underline", "underline", "下划线"],
+  ];
+  const alignButtons = [
+    ["justifyLeft", "alignLeft", "左对齐"],
+    ["justifyCenter", "alignCenter", "居中对齐"],
+    ["justifyRight", "alignRight", "右对齐"],
+  ];
+  return `
+    <div class="format-bar" data-testid="editor-format-bar">
+      ${commandButtons
+        .map(
+          ([command, iconName, label]) =>
+            `<button class="format-button" type="button" data-format-cmd="${command}" aria-label="${label}">${icon(iconName, "", 17)}</button>`,
+        )
+        .join("")}
+      <button class="format-button" type="button" data-action="format-menu" data-menu="size" aria-label="字号">${icon("type", "", 17)}</button>
+      <button class="format-button" type="button" data-action="format-menu" data-menu="family" aria-label="字体">${icon("baseline", "", 17)}</button>
+      <button class="format-button" type="button" data-action="format-menu" data-menu="color" aria-label="颜色">${icon("droplet", "", 17)}</button>
+      <span class="format-divider"></span>
+      ${alignButtons
+        .map(
+          ([command, iconName, label]) =>
+            `<button class="format-button" type="button" data-format-cmd="${command}" aria-label="${label}">${icon(iconName, "", 17)}</button>`,
+        )
+        .join("")}
+      <div class="format-menu" data-format-menu="size" hidden>
+        ${EDITOR_FONT_SIZES.map(
+          (size) =>
+            `<button class="size-option" type="button" data-format-apply="size" data-value="${size}">${size}</button>`,
+        ).join("")}
+      </div>
+      <div class="format-menu is-column" data-format-menu="family" hidden>
+        ${EDITOR_FONT_FAMILIES.map(
+          (key) =>
+            `<button class="menu-item" type="button" data-format-apply="family" data-value="${key}"><span>${FONT_FAMILY_LABELS[key]}</span></button>`,
+        ).join("")}
+      </div>
+      <div class="format-menu" data-format-menu="color" hidden>
+        ${EDITOR_COLORS.map(
+          (key) =>
+            `<button class="color-option" type="button" data-format-apply="color" data-value="${key}" aria-label="${COLOR_LABELS[key]}"><span class="color-dot" style="--dot: ${EDITOR_COLOR_VALUES[key]}"></span></button>`,
+        ).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function noteFormMarkup() {
   const note = noteFromEditor();
   const title = note?.title ?? "";
-  const contentValue = note?.content ?? "";
   const category = note?.category ?? "";
   const date = note?.date ?? toDateKey(new Date());
   const dateField =
@@ -251,17 +413,18 @@ function noteFormMarkup() {
         <div class="note-meta-line">
           <span>${escapeHtml(compactDateTime(note?.createdAt ?? new Date().toISOString()))}</span>
           <span>|</span>
-          <span data-word-count>${wordCount(contentValue)}字</span>
+          <span data-word-count>${wordCount(note ? notePreviewText(note) : "")}字</span>
           <span>|</span>
           <button class="meta-category" type="button" data-action="toggle-editor-category">
             <span class="category-name">${category ? escapeHtml(categoryLabelIn(appSettings.noteCategories, category)) : "未分类"}</span>${icon("chevronDown", "tiny-chevron", 13)}
           </button>
         </div>
         <div class="small-menu" data-testid="editor-category-menu" ${state.editorCategoryOpen ? "" : "hidden"}>${categoryOptionMarkup()}</div>
-        <textarea id="note-content" name="content" placeholder="正文" spellcheck="false" aria-label="笔记内容">${escapeHtml(contentValue)}</textarea>
+        <div class="rich-editor" name="content" data-testid="note-content-editor" contenteditable="true" data-placeholder="正文" spellcheck="false" aria-label="笔记内容" style="${escapeAttribute(editorDefaultStyle())}">${richContentForEditor(note)}</div>
         ${dateField}
         <p class="error-text" data-form-errors aria-live="polite"></p>
       </div>
+      ${formatBarMarkup()}
     </form>
   `;
 }
@@ -320,7 +483,7 @@ function noteListRows() {
         <article class="list-row" data-testid="note-item" data-note-id="${note.id}">
           <button class="row-main" type="button" data-action="open-note" data-id="${note.id}">
             <h2>${escapeHtml(note.title)}</h2>
-            <p>${escapeHtml(note.content)}</p>
+            <p>${escapeHtml(notePreviewText(note))}</p>
             <div class="row-meta">
               <span>${escapeHtml(note.date)}</span>
               <span>${escapeHtml(categoryLabelIn(appSettings.noteCategories, note.category))}</span>
@@ -387,7 +550,7 @@ function renderTodosView() {
 
 function itemSummary(item) {
   if (item.kind === "note") {
-    return item.content;
+    return notePreviewText(item);
   }
   return `${timeRangeLabel(item)} · ${item.completed ? "已完成" : "未完成"}`;
 }
@@ -456,6 +619,35 @@ function renderMineView() {
               <button class="${appSettings.theme === "eye" ? "is-active" : ""}" type="button" data-action="theme-mode" data-mode="eye">护眼</button>
             </div>
           </div>
+          <div class="setting-row">
+            <strong>默认字体</strong>
+            <select class="setting-select" name="editorFontFamily" aria-label="默认字体">
+              ${EDITOR_FONT_FAMILIES.map(
+                (key) =>
+                  `<option value="${key}" ${appSettings.editorFontFamily === key ? "selected" : ""}>${FONT_FAMILY_LABELS[key]}</option>`,
+              ).join("")}
+            </select>
+          </div>
+          <div class="setting-row">
+            <strong>默认字号</strong>
+            <div class="segmented-control">
+              ${[[15, "小"], [17, "中"], [20, "大"], [24, "特大"]]
+                .map(
+                  ([value, label]) =>
+                    `<button class="${appSettings.editorFontSize === value ? "is-active" : ""}" type="button" data-action="editor-font-size" data-value="${value}">${label}</button>`,
+                )
+                .join("")}
+            </div>
+          </div>
+          <div class="setting-row">
+            <strong>默认颜色</strong>
+            <div class="color-dot-row">
+              ${EDITOR_COLORS.map(
+                (key) =>
+                  `<button class="color-dot${appSettings.editorColor === key ? " is-active" : ""}" type="button" data-action="editor-color" data-value="${key}" aria-label="${COLOR_LABELS[key]}" style="--dot: ${EDITOR_COLOR_VALUES[key]}"></button>`,
+              ).join("")}
+            </div>
+          </div>
         </section>
         <section class="settings-card">
           <div class="settings-card-head">
@@ -487,6 +679,8 @@ function renderMineView() {
             <li>新增：外观设置，可开启护眼模式。</li>
             <li>新增：笔记支持按标题与正文搜索。</li>
             <li>新增：笔记支持自定义分类，可在设置中添加、重命名和删除分类。</li>
+            <li>新增：编辑笔记支持加粗、斜体、下划线、字号、字体、颜色与对齐。</li>
+            <li>新增：外观设置中可配置默认字体、字号与颜色。</li>
           </ul>
           <h3 class="version-subtitle">第二版</h3>
           <ul class="version-list">
@@ -818,9 +1012,11 @@ function requestDeleteCategory(key) {
 
 function saveNoteFromForm(form) {
   const existing = noteFromEditor();
+  const editorElement = form.querySelector('[data-testid="note-content-editor"]');
   const draft = {
     title: form.elements.title.value,
-    content: form.elements.content.value,
+    content: editorElement ? editorElement.innerHTML : "",
+    richText: true,
     category: form.elements.category.value,
     date: noteDateForSave(existing, form),
   };
@@ -952,6 +1148,18 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const formatApply = event.target.closest("[data-format-apply]");
+  if (formatApply) {
+    applyInlineFormat(formatApply.dataset.formatApply, formatApply.dataset.value);
+    return;
+  }
+
+  const formatCommand = event.target.closest("[data-format-cmd]");
+  if (formatCommand) {
+    runEditorCommand(formatCommand.dataset.formatCmd);
+    return;
+  }
+
   const actionElement = event.target.closest("[data-action]");
   if (!actionElement) {
     return;
@@ -1036,6 +1244,26 @@ document.addEventListener("click", (event) => {
     render();
   } else if (action === "delete-category") {
     requestDeleteCategory(actionElement.dataset.key);
+  } else if (action === "format-menu") {
+    const menuName = actionElement.dataset.menu;
+    document.querySelectorAll(".format-menu").forEach((menu) => {
+      menu.hidden = menu.dataset.formatMenu === menuName ? !menu.hidden : true;
+    });
+    return;
+  } else if (action === "editor-font-size") {
+    const size = Number.parseInt(actionElement.dataset.value, 10);
+    if (Number.isFinite(size) && appSettings.editorFontSize !== size) {
+      updateAppSettings({ editorFontSize: size });
+      render();
+      showToast(`默认字号已设为 ${size}px`);
+    }
+  } else if (action === "editor-color") {
+    const color = actionElement.dataset.value;
+    if (EDITOR_COLORS.includes(color) && appSettings.editorColor !== color) {
+      updateAppSettings({ editorColor: color });
+      render();
+      showToast("默认颜色已更新");
+    }
   } else if (action === "close-confirm") {
     closeConfirm();
   }
@@ -1076,6 +1304,24 @@ function showCategoryError(message) {
     errorElement.textContent = message;
   }
 }
+
+document.addEventListener("mousedown", (event) => {
+  if (event.target.closest(".format-bar")) {
+    event.preventDefault();
+  }
+});
+
+document.addEventListener("change", (event) => {
+  const fontSelect = event.target.closest('select[name="editorFontFamily"]');
+  if (!fontSelect) {
+    return;
+  }
+  if (EDITOR_FONT_FAMILIES.includes(fontSelect.value)) {
+    updateAppSettings({ editorFontFamily: fontSelect.value });
+    render();
+    showToast("默认字体已更新");
+  }
+});
 
 document.addEventListener("submit", (event) => {
   const noteForm = event.target.closest("[data-form='note-editor']");
@@ -1158,6 +1404,14 @@ document.addEventListener("input", (event) => {
     }
     pageSubtitle.textContent = notesSubtitleText();
     syncLocation();
+    return;
+  }
+  const editorElement = event.target.closest('[data-testid="note-content-editor"]');
+  if (editorElement) {
+    const counter = document.querySelector("[data-word-count]");
+    if (counter) {
+      counter.textContent = `${wordCount(editorElement.textContent)}字`;
+    }
     return;
   }
   const textarea = event.target.closest('textarea[name="content"]');

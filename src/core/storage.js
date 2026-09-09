@@ -3,11 +3,24 @@ import { DEFAULT_NOTE_CATEGORIES, normalizeCategories } from "./categories.js";
 export const STORAGE_KEY = "local-notes:items:v1";
 export const SETTINGS_KEY = "local-notes:settings:v1";
 
+export const EDITOR_FONT_FAMILIES = Object.freeze([
+  "default",
+  "songti",
+  "heiti",
+  "kaiti",
+  "mono",
+]);
+
+export const EDITOR_COLORS = Object.freeze(["ink", "gray", "red", "green", "blue"]);
+
 export const DEFAULT_SETTINGS = Object.freeze({
   noteDateMode: "auto",
   todoGraceMinutes: 5,
   theme: "light",
   noteCategories: DEFAULT_NOTE_CATEGORIES,
+  editorFontFamily: "default",
+  editorFontSize: 17,
+  editorColor: "ink",
 });
 
 export function migrateItems(items) {
@@ -106,6 +119,16 @@ export function readSettings(storage) {
     const parsed = JSON.parse(raw);
     const noteDateMode = parsed.noteDateMode === "manual" ? "manual" : "auto";
     const theme = parsed.theme === "eye" ? "eye" : "light";
+    const editorFontFamily = EDITOR_FONT_FAMILIES.includes(parsed.editorFontFamily)
+      ? parsed.editorFontFamily
+      : DEFAULT_SETTINGS.editorFontFamily;
+    const rawEditorFontSize = Number(parsed.editorFontSize);
+    const editorFontSize = Number.isFinite(rawEditorFontSize)
+      ? Math.min(32, Math.max(12, Math.round(rawEditorFontSize)))
+      : DEFAULT_SETTINGS.editorFontSize;
+    const editorColor = EDITOR_COLORS.includes(parsed.editorColor)
+      ? parsed.editorColor
+      : DEFAULT_SETTINGS.editorColor;
     const todoGraceMinutes = Number.isFinite(Number(parsed.todoGraceMinutes))
       ? Math.min(1440, Math.max(0, Math.round(Number(parsed.todoGraceMinutes))))
       : DEFAULT_SETTINGS.todoGraceMinutes;
@@ -116,6 +139,9 @@ export function readSettings(storage) {
         : DEFAULT_SETTINGS.todoGraceMinutes,
       theme,
       noteCategories: normalizeCategories(parsed.noteCategories),
+      editorFontFamily,
+      editorFontSize,
+      editorColor,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

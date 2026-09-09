@@ -17,6 +17,46 @@ const ICON_NODES = {
     ["path", { d: "M18 6 6 18" }],
     ["path", { d: "m6 6 12 12" }],
   ],
+  bold: [
+    ["path", { d: "M7 4h7a4 4 0 0 1 0 8H7z" }],
+    ["path", { d: "M7 12h8a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" }],
+  ],
+  italic: [
+    ["path", { d: "M19 4h-9" }],
+    ["path", { d: "M14 20H5" }],
+    ["path", { d: "M15 4 9 20" }],
+  ],
+  underline: [
+    ["path", { d: "M6 4v6a6 6 0 0 0 12 0V4" }],
+    ["path", { d: "M4 20h16" }],
+  ],
+  type: [
+    ["polyline", { points: "4 7 4 4 20 4 20 7" }],
+    ["path", { d: "M9 20h6" }],
+    ["path", { d: "M12 4v16" }],
+  ],
+  baseline: [
+    ["path", { d: "M4 20h16" }],
+    ["path", { d: "m7 16 5-12 5 12" }],
+  ],
+  droplet: [
+    ["path", { d: "M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C6 11.1 5 13 5 15a7 7 0 0 0 7 7z" }],
+  ],
+  alignLeft: [
+    ["path", { d: "M21 6H3" }],
+    ["path", { d: "M15 12H3" }],
+    ["path", { d: "M17 18H3" }],
+  ],
+  alignCenter: [
+    ["path", { d: "M21 6H3" }],
+    ["path", { d: "M17 12H7" }],
+    ["path", { d: "M19 18H5" }],
+  ],
+  alignRight: [
+    ["path", { d: "M21 6H3" }],
+    ["path", { d: "M21 12H9" }],
+    ["path", { d: "M21 18H7" }],
+  ],
   fileText: [
     ["path", { d: "M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" }],
     ["path", { d: "M14 2v5a1 1 0 0 0 1 1h5" }],

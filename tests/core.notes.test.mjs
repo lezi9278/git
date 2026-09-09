@@ -114,3 +114,30 @@ test("校验与筛选支持自定义分类列表", () => {
   assert.equal(filterNotes(items, "all", keys).length, 2);
   assert.equal(filterNotes(items, "life", keys).length, 2);
 });
+
+test("富文本笔记按可见文字校验并保留富文本标记", () => {
+  const now = new Date("2026-09-08T10:00:00.000Z");
+  const richNote = createNote(
+    { ...validDraft, content: "<p><b>加粗内容</b></p>", richText: true },
+    now,
+  );
+  assert.equal(richNote.richText, true);
+  assert.equal(richNote.content, "<p><b>加粗内容</b></p>");
+
+  assert.equal(
+    validateNoteDraft({ ...validDraft, content: "<div><br></div>", richText: true }).valid,
+    false,
+  );
+  assert.equal(
+    validateNoteDraft({ ...validDraft, content: "<p><script>坏内容</script></p>", richText: true })
+      .valid,
+    false,
+  );
+  assert.equal(createNote(validDraft, now).richText, false);
+
+  const sanitized = createNote(
+    { ...validDraft, content: '<p onclick="x()">安全</p>', richText: true },
+    now,
+  );
+  assert.equal(sanitized.content, "<p>安全</p>");
+});

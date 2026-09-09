@@ -51,7 +51,7 @@ test("第三版自定义分类：添加、筛选、编辑菜单、重命名与�
   await page.locator('[data-action="new-note"]').click();
   await page.locator('[data-testid="note-editor-page"]').waitFor();
   await page.locator('input[name="title"]').fill("工作笔记一");
-  await page.locator('textarea[name="content"]').fill("记录工作内容。");
+  await page.locator('[data-testid="note-content-editor"]').fill("记录工作内容。");
   await page.locator('[data-action="toggle-editor-category"]').click();
   await page.locator('[data-testid="editor-category-menu"]').waitFor();
   await page.locator("[data-category-option]", { hasText: "工作" }).click();

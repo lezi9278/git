@@ -650,6 +650,144 @@ textarea:focus {
   resize: none;
 }
 
+.rich-editor {
+  flex: 1;
+  width: 100%;
+  min-height: 46vh;
+  margin-top: 26px;
+  color: var(--ink);
+  font-size: 17px;
+  line-height: 1.8;
+  overflow-wrap: break-word;
+}
+
+.rich-editor:focus {
+  outline: 0;
+}
+
+.rich-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--placeholder);
+}
+
+.format-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-translucent);
+  backdrop-filter: blur(12px);
+}
+
+.format-button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--gray);
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.format-button:hover {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.format-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  flex: 0 0 auto;
+  background: var(--line-strong);
+}
+
+.format-menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 10px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--white);
+  box-shadow: 0 14px 34px rgba(17, 17, 17, 0.13);
+  animation: popover-in 160ms ease both;
+}
+
+.format-menu.is-column {
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 132px;
+}
+
+.size-option {
+  min-width: 34px;
+  min-height: 30px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.size-option:hover {
+  background: var(--paper);
+}
+
+.color-option {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.color-option:hover {
+  background: var(--paper);
+}
+
+.color-dot {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--dot, var(--ink));
+}
+
+.color-dot.is-active {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.color-dot-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setting-select {
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--white);
+  color: var(--ink);
+  font-size: 12px;
+}
+
 .note-date-field {
   margin-top: 22px;
 }
