@@ -1,5 +1,9 @@
-import { CATEGORY_KEYS, CATEGORY_LABELS, categoryLabel } from "./core/categories.js";
-import { createNote, filterNotes, sortNotes, updateNote } from "./core/notes.js";
+import {
+  CATEGORY_LABEL_MAX_LENGTH,
+  categoryKeysOf,
+  categoryLabelIn,
+} from "./core/categories.js";
+import { createNote, filterNotes, makeId, searchNotes, sortNotes, updateNote } from "./core/notes.js";
 import { listForRange, summarizeItems } from "./core/stats.js";
 import {
   DEFAULT_SETTINGS,
@@ -21,15 +25,22 @@ const storageBackend = window.localStorage;
 const repository = loadRepository(storageBackend);
 let appSettings = readSettings(storageBackend);
 
+function currentCategoryKeys() {
+  return categoryKeysOf(appSettings.noteCategories);
+}
+
 const initialQuery = new URLSearchParams(window.location.search);
 const state = {
   view: ["notes", "todos", "mine"].includes(initialQuery.get("view"))
     ? initialQuery.get("view")
     : "notes",
-  noteCategory: ["all", ...CATEGORY_KEYS].includes(initialQuery.get("category"))
+  noteCategory: ["all", ...currentCategoryKeys()].includes(initialQuery.get("category"))
     ? initialQuery.get("category")
     : "all",
+  noteSearchOpen: Boolean(initialQuery.get("q")),
+  noteSearchQuery: initialQuery.get("q") ?? "",
   categoryMenuOpen: false,
+  categoryEditingKey: null,
   editorCategoryOpen: false,
   editor: null,
   returnView: { view: "notes", noteCategory: "all" },
@@ -52,6 +63,7 @@ const pageTitle = document.querySelector("#page-title");
 const pageSubtitle = document.querySelector("#page-subtitle");
 const pageActions = document.querySelector("#page-actions");
 const categoryPopover = document.querySelector("#category-popover");
+const searchBar = document.querySelector("#search-bar");
 const fab = document.querySelector("#fab");
 const bottomTabs = document.querySelector("#bottom-tabs");
 const content = document.querySelector("#content");
@@ -100,23 +112,42 @@ function todoFromEditor() {
 }
 
 function activeNotes() {
-  return sortNotes(filterNotes(repository.items(), state.noteCategory));
+  return sortNotes(
+    searchNotes(
+      filterNotes(repository.items(), state.noteCategory, currentCategoryKeys()),
+      state.noteSearchQuery,
+    ),
+  );
+}
+
+function notesSubtitleText() {
+  const keyword = state.noteSearchQuery.trim();
+  if (keyword) {
+    return `找到 ${activeNotes().length} 篇笔记`;
+  }
+  return `${repository.items().filter((item) => item.kind === "note").length} 篇笔记`;
 }
 
 function allNoteCounts() {
   const notes = repository.items().filter((item) => item.kind === "note");
-  const count = (category) => notes.filter((note) => note.category === category).length;
-  return {
-    all: notes.length,
-    insight: count("insight"),
-    life: count("life"),
-    thinking: count("thinking"),
-  };
+  const counts = { all: notes.length };
+  for (const category of appSettings.noteCategories) {
+    counts[category.key] = notes.filter((note) => note.category === category.key).length;
+  }
+  return counts;
 }
 
 function updateAppSettings(patch) {
   appSettings = { ...appSettings, ...patch };
   writeSettings(storageBackend, appSettings);
+}
+
+function applyTheme() {
+  if (appSettings.theme === "eye") {
+    document.body.dataset.theme = "eye";
+  } else {
+    delete document.body.dataset.theme;
+  }
 }
 
 function noteDateForSave(existing, form) {
@@ -176,19 +207,21 @@ function compactDateTime(value) {
 
 function categoryOptionMarkup() {
   const category = noteFromEditor()?.category ?? "";
-  return CATEGORY_KEYS.map(
-    (key) => `
+  return appSettings.noteCategories
+    .map(
+      (entry) => `
       <button
-        class="menu-item${category === key ? " is-active" : ""}"
+        class="menu-item${category === entry.key ? " is-active" : ""}"
         type="button"
-        data-category-option="${key}"
-        aria-pressed="${category === key}"
+        data-category-option="${entry.key}"
+        aria-pressed="${category === entry.key}"
       >
-        <span>${CATEGORY_LABELS[key]}</span>
-        ${category === key ? icon("check", "menu-check", 15) : ""}
+        <span>${escapeHtml(entry.label)}</span>
+        ${category === entry.key ? icon("check", "menu-check", 15) : ""}
       </button>
     `,
-  ).join("");
+    )
+    .join("");
 }
 
 function noteFormMarkup() {
@@ -221,7 +254,7 @@ function noteFormMarkup() {
           <span data-word-count>${wordCount(contentValue)}字</span>
           <span>|</span>
           <button class="meta-category" type="button" data-action="toggle-editor-category">
-            <span class="category-name">${category ? categoryLabel(category) : "未分类"}</span>${icon("chevronDown", "tiny-chevron", 13)}
+            <span class="category-name">${category ? escapeHtml(categoryLabelIn(appSettings.noteCategories, category)) : "未分类"}</span>${icon("chevronDown", "tiny-chevron", 13)}
           </button>
         </div>
         <div class="small-menu" data-testid="editor-category-menu" ${state.editorCategoryOpen ? "" : "hidden"}>${categoryOptionMarkup()}</div>
@@ -274,31 +307,36 @@ function renderEditor() {
   `;
 }
 
-function renderNotesView() {
+function noteListRows() {
   const notes = activeNotes();
-  const rows = notes.length
-    ? notes
-        .map(
-          (note) => `
-            <article class="list-row" data-testid="note-item" data-note-id="${note.id}">
-              <button class="row-main" type="button" data-action="open-note" data-id="${note.id}">
-                <h2>${escapeHtml(note.title)}</h2>
-                <p>${escapeHtml(note.content)}</p>
-                <div class="row-meta">
-                  <span>${escapeHtml(note.date)}</span>
-                  <span>${categoryLabel(note.category)}</span>
-                </div>
-              </button>
-              <button class="row-delete" type="button" data-action="delete-note" data-id="${note.id}" aria-label="删除笔记">${icon("trash", "", 17)}</button>
-            </article>
-          `,
-        )
-        .join("")
-    : '<div class="empty-state">还没有笔记</div>';
+  if (!notes.length) {
+    return state.noteSearchQuery.trim()
+      ? '<div class="empty-state">没有匹配的笔记</div>'
+      : '<div class="empty-state">还没有笔记</div>';
+  }
+  return notes
+    .map(
+      (note) => `
+        <article class="list-row" data-testid="note-item" data-note-id="${note.id}">
+          <button class="row-main" type="button" data-action="open-note" data-id="${note.id}">
+            <h2>${escapeHtml(note.title)}</h2>
+            <p>${escapeHtml(note.content)}</p>
+            <div class="row-meta">
+              <span>${escapeHtml(note.date)}</span>
+              <span>${escapeHtml(categoryLabelIn(appSettings.noteCategories, note.category))}</span>
+            </div>
+          </button>
+          <button class="row-delete" type="button" data-action="delete-note" data-id="${note.id}" aria-label="删除笔记">${icon("trash", "", 17)}</button>
+        </article>
+      `,
+    )
+    .join("");
+}
 
+function renderNotesView() {
   return `
     <div class="view plain-list-page view-enter" data-testid="notes-list-view">
-      <div class="plain-list">${rows}</div>
+      <div class="plain-list">${noteListRows()}</div>
     </div>
   `;
 }
@@ -361,6 +399,45 @@ function itemDateLabel(item) {
   return (item.startAt ?? item.endAt ?? "").slice(0, 10);
 }
 
+function categorySettingsMarkup() {
+  const rows = appSettings.noteCategories
+    .map((category) => {
+      if (state.categoryEditingKey === category.key) {
+        return `
+          <form class="category-row category-edit-form" data-form="category-rename" data-key="${category.key}">
+            <input name="label" type="text" value="${escapeAttribute(category.label)}" maxlength="${CATEGORY_LABEL_MAX_LENGTH}" aria-label="分类名称" autocomplete="off" />
+            <button class="button small-button" type="submit">保存</button>
+            <button class="button small-button" type="button" data-action="cancel-category-rename">取消</button>
+          </form>
+        `;
+      }
+      return `
+        <div class="category-row">
+          <span class="category-row-name">${escapeHtml(category.label)}</span>
+          <span class="category-row-actions">
+            <button class="button small-button" type="button" data-action="rename-category" data-key="${category.key}">重命名</button>
+            <button class="button small-button" type="button" data-action="delete-category" data-key="${category.key}">删除</button>
+          </span>
+        </div>
+      `;
+    })
+    .join("");
+  return `
+    <section class="settings-card" data-testid="category-settings">
+      <div class="settings-card-head">
+        <h2>笔记分类</h2>
+        <span>用于筛选与编辑</span>
+      </div>
+      <div class="category-list" data-testid="category-list">${rows}</div>
+      <form class="category-add" data-form="category-add">
+        <input name="label" type="text" placeholder="新分类名称" maxlength="${CATEGORY_LABEL_MAX_LENGTH}" aria-label="新分类名称" autocomplete="off" />
+        <button class="button small-button" type="submit">添加</button>
+      </form>
+      <p class="error-text" data-category-errors aria-live="polite"></p>
+    </section>
+  `;
+}
+
 function renderMineView() {
   const tab = (section, label) =>
     `<button class="section-tab${state.mineSection === section ? " is-active" : ""}" type="button" data-action="mine-section" data-section="${section}">${label}</button>`;
@@ -368,6 +445,18 @@ function renderMineView() {
     <div class="view mine-view view-enter" data-testid="mine-view">
       <div class="section-tabs">${tab("creations", "我的创作")}${tab("settings", "设置")}</div>
       <div class="settings-stack" data-testid="settings-view">
+        <section class="settings-card" data-testid="appearance-settings">
+          <div class="settings-card-head">
+            <h2>外观设置</h2>
+          </div>
+          <div class="setting-row">
+            <strong>显示模式</strong>
+            <div class="segmented-control">
+              <button class="${appSettings.theme === "light" ? "is-active" : ""}" type="button" data-action="theme-mode" data-mode="light">亮色</button>
+              <button class="${appSettings.theme === "eye" ? "is-active" : ""}" type="button" data-action="theme-mode" data-mode="eye">护眼</button>
+            </div>
+          </div>
+        </section>
         <section class="settings-card">
           <div class="settings-card-head">
             <h2>时间设置</h2>
@@ -388,11 +477,18 @@ function renderMineView() {
             </div>
           </form>
         </section>
+        ${categorySettingsMarkup()}
         <section class="settings-card">
           <div class="settings-card-head">
             <h2>版本说明</h2>
-            <span>第二版</span>
+            <span>第三版</span>
           </div>
+          <ul class="version-list">
+            <li>新增：外观设置，可开启护眼模式。</li>
+            <li>新增：笔记支持按标题与正文搜索。</li>
+            <li>新增：笔记支持自定义分类，可在设置中添加、重命名和删除分类。</li>
+          </ul>
+          <h3 class="version-subtitle">第二版</h3>
           <ul class="version-list">
             <li>新增：笔记和待办采用独立的新建与编辑页面。</li>
             <li>新增：待办支持开始时间与结束时间。</li>
@@ -463,7 +559,9 @@ function renderMineView() {
 }
 
 function titleCategoryName(category) {
-  return category === "all" ? "全部" : CATEGORY_LABELS[category] ?? "全部";
+  return category === "all"
+    ? "全部"
+    : categoryLabelIn(appSettings.noteCategories, category);
 }
 
 function renderTopbar() {
@@ -474,7 +572,6 @@ function renderTopbar() {
     return;
   }
   if (state.view === "notes") {
-    const notes = repository.items().filter((item) => item.kind === "note");
     const counts = allNoteCounts();
     pageTitle.innerHTML = `
       <button class="title-dropdown" type="button" data-action="category-menu" aria-expanded="${state.categoryMenuOpen}">
@@ -482,13 +579,23 @@ function renderTopbar() {
         ${icon("chevronDown", "title-chevron", 16)}
       </button>
     `;
-    pageSubtitle.textContent = `${notes.length} 篇笔记`;
+    pageSubtitle.textContent = notesSubtitleText();
+    pageActions.innerHTML = `
+      <button class="icon-tool" type="button" data-action="note-search-toggle" aria-label="${state.noteSearchOpen ? "关闭搜索" : "搜索笔记"}">${icon("search")}</button>
+    `;
+    searchBar.hidden = !state.noteSearchOpen;
+    searchBar.innerHTML = state.noteSearchOpen
+      ? `
+        <input data-testid="note-search-input" name="note-search" type="text" value="${escapeAttribute(state.noteSearchQuery)}" placeholder="搜索标题或正文" autocomplete="off" aria-label="搜索笔记" />
+        <button class="search-clear" type="button" data-action="note-search-clear" aria-label="清空搜索" ${state.noteSearchQuery.trim() ? "" : "hidden"}>${icon("close", "", 15)}</button>
+      `
+      : "";
     const categories = [
       { key: "all", label: "全部", count: counts.all },
-      ...CATEGORY_KEYS.map((key) => ({
-        key,
-        label: CATEGORY_LABELS[key],
-        count: counts[key],
+      ...appSettings.noteCategories.map((category) => ({
+        key: category.key,
+        label: category.label,
+        count: counts[category.key] ?? 0,
       })),
     ];
     categoryPopover.innerHTML = categories
@@ -523,6 +630,8 @@ function renderTopbar() {
         ? "偏好设置"
         : "创作记录";
   categoryPopover.hidden = true;
+  searchBar.hidden = true;
+  searchBar.innerHTML = "";
 }
 
 function renderFab() {
@@ -562,6 +671,7 @@ function renderBottomTabs() {
 
 function render() {
   const composing = Boolean(state.editor);
+  applyTheme();
   renderTopbar();
   renderFab();
   renderBottomTabs();
@@ -590,6 +700,10 @@ function syncLocation() {
   }
   if (state.range !== "month") {
     params.set("range", state.range);
+  }
+  const searchKeyword = state.noteSearchQuery.trim();
+  if (searchKeyword) {
+    params.set("q", searchKeyword);
   }
   const query = params.toString();
   history.replaceState(null, "", query ? `${location.pathname}?${query}` : location.pathname);
@@ -665,6 +779,43 @@ function deleteTodo(id) {
   );
 }
 
+function requestDeleteCategory(key) {
+  const category = appSettings.noteCategories.find((entry) => entry.key === key);
+  if (!category) {
+    return;
+  }
+  if (appSettings.noteCategories.length <= 1) {
+    showToast("至少保留一个分类");
+    return;
+  }
+  const noteCount = repository
+    .items()
+    .filter((item) => item.kind === "note" && item.category === key).length;
+  showConfirm(
+    {
+      title: "删除分类",
+      detail:
+        noteCount > 0
+          ? `分类“${category.label}”下有 ${noteCount} 篇笔记，删除后这些笔记将显示为“未分类”。`
+          : `将删除分类“${category.label}”。`,
+      actionLabel: "删除",
+    },
+    () => {
+      updateAppSettings({
+        noteCategories: appSettings.noteCategories.filter((entry) => entry.key !== key),
+      });
+      if (state.categoryEditingKey === key) {
+        state.categoryEditingKey = null;
+      }
+      if (state.noteCategory === key) {
+        state.noteCategory = "all";
+      }
+      render();
+      showToast("分类已删除");
+    },
+  );
+}
+
 function saveNoteFromForm(form) {
   const existing = noteFromEditor();
   const draft = {
@@ -674,7 +825,9 @@ function saveNoteFromForm(form) {
     date: noteDateForSave(existing, form),
   };
   try {
-    const saved = existing ? updateNote(existing, draft) : createNote(draft);
+    const saved = existing
+      ? updateNote(existing, draft, new Date(), currentCategoryKeys())
+      : createNote(draft, new Date(), currentCategoryKeys());
     repository.upsert(saved);
     state.noteCategory = saved.category;
     closeEditor();
@@ -750,6 +903,9 @@ function selectView(view) {
   }
   state.editor = null;
   state.categoryMenuOpen = false;
+  state.noteSearchOpen = false;
+  state.noteSearchQuery = "";
+  state.categoryEditingKey = null;
   state.view = view;
   render();
 }
@@ -774,7 +930,10 @@ document.addEventListener("click", (event) => {
     }
     const nameElement = document.querySelector(".category-name");
     if (nameElement) {
-      nameElement.textContent = categoryLabel(categoryOption.dataset.categoryOption);
+      nameElement.textContent = categoryLabelIn(
+        appSettings.noteCategories,
+        categoryOption.dataset.categoryOption,
+      );
     }
     const menu = document.querySelector(".small-menu");
     if (menu) {
@@ -839,6 +998,44 @@ document.addEventListener("click", (event) => {
     updateAppSettings({ noteDateMode: mode === "manual" ? "manual" : "auto" });
     render();
     showToast(mode === "manual" ? "笔记日期已改为手动填写" : "笔记日期已改为自动获取");
+  } else if (action === "theme-mode") {
+    const mode = actionElement.dataset.mode === "eye" ? "eye" : "light";
+    if (appSettings.theme !== mode) {
+      updateAppSettings({ theme: mode });
+      render();
+      showToast(mode === "eye" ? "已开启护眼模式" : "已恢复亮色模式");
+    }
+  } else if (action === "note-search-toggle") {
+    state.noteSearchOpen = !state.noteSearchOpen;
+    state.noteSearchQuery = state.noteSearchOpen ? state.noteSearchQuery : "";
+    render();
+    if (state.noteSearchOpen) {
+      searchBar.querySelector("input")?.focus();
+    }
+  } else if (action === "note-search-clear") {
+    state.noteSearchQuery = "";
+    const searchInput = searchBar.querySelector("input");
+    if (searchInput) {
+      searchInput.value = "";
+    }
+    const clearButton = searchBar.querySelector("[data-action='note-search-clear']");
+    if (clearButton) {
+      clearButton.hidden = true;
+    }
+    const list = content.querySelector(".plain-list");
+    if (list) {
+      list.innerHTML = noteListRows();
+    }
+    pageSubtitle.textContent = notesSubtitleText();
+    syncLocation();
+  } else if (action === "rename-category") {
+    state.categoryEditingKey = actionElement.dataset.key;
+    render();
+  } else if (action === "cancel-category-rename") {
+    state.categoryEditingKey = null;
+    render();
+  } else if (action === "delete-category") {
+    requestDeleteCategory(actionElement.dataset.key);
   } else if (action === "close-confirm") {
     closeConfirm();
   }
@@ -848,6 +1045,37 @@ document.addEventListener("click", (event) => {
     render();
   }
 });
+
+function validateCategoryLabel(label, { excludeKey = null } = {}) {
+  if (!label) {
+    return "分类名称不能为空";
+  }
+  if (label.length > CATEGORY_LABEL_MAX_LENGTH) {
+    return `分类名称不能超过 ${CATEGORY_LABEL_MAX_LENGTH} 个字符`;
+  }
+  if (
+    appSettings.noteCategories.some(
+      (entry) => entry.key !== excludeKey && entry.label === label,
+    )
+  ) {
+    return "分类名称已存在";
+  }
+  return "";
+}
+
+function clearCategoryError() {
+  const errorElement = document.querySelector("[data-category-errors]");
+  if (errorElement) {
+    errorElement.textContent = "";
+  }
+}
+
+function showCategoryError(message) {
+  const errorElement = document.querySelector("[data-category-errors]");
+  if (errorElement) {
+    errorElement.textContent = message;
+  }
+}
 
 document.addEventListener("submit", (event) => {
   const noteForm = event.target.closest("[data-form='note-editor']");
@@ -872,10 +1100,66 @@ document.addEventListener("submit", (event) => {
     updateAppSettings({ todoGraceMinutes: minutes });
     render();
     showToast(`待办过期等待已设为 ${minutes} 分钟`);
+    return;
+  }
+  const categoryAddForm = event.target.closest("[data-form='category-add']");
+  if (categoryAddForm) {
+    event.preventDefault();
+    const label = categoryAddForm.elements.label.value.trim();
+    const error = validateCategoryLabel(label);
+    if (error) {
+      showCategoryError(error);
+      return;
+    }
+    clearCategoryError();
+    updateAppSettings({
+      noteCategories: [
+        ...appSettings.noteCategories,
+        { key: makeId("cat"), label },
+      ],
+    });
+    render();
+    showToast(`已添加分类“${label}”`);
+    return;
+  }
+  const categoryRenameForm = event.target.closest("[data-form='category-rename']");
+  if (categoryRenameForm) {
+    event.preventDefault();
+    const key = categoryRenameForm.dataset.key;
+    const label = categoryRenameForm.elements.label.value.trim();
+    const error = validateCategoryLabel(label, { excludeKey: key });
+    if (error) {
+      showCategoryError(error);
+      return;
+    }
+    clearCategoryError();
+    updateAppSettings({
+      noteCategories: appSettings.noteCategories.map((entry) =>
+        entry.key === key ? { ...entry, label } : entry,
+      ),
+    });
+    state.categoryEditingKey = null;
+    render();
+    showToast("分类已重命名");
   }
 });
 
 document.addEventListener("input", (event) => {
+  const searchInput = event.target.closest('[data-testid="note-search-input"]');
+  if (searchInput) {
+    state.noteSearchQuery = searchInput.value;
+    const list = content.querySelector(".plain-list");
+    if (list) {
+      list.innerHTML = noteListRows();
+    }
+    const clearButton = searchBar.querySelector("[data-action='note-search-clear']");
+    if (clearButton) {
+      clearButton.hidden = !state.noteSearchQuery.trim();
+    }
+    pageSubtitle.textContent = notesSubtitleText();
+    syncLocation();
+    return;
+  }
   const textarea = event.target.closest('textarea[name="content"]');
   if (!textarea) {
     return;

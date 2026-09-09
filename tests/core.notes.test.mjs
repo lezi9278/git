@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   createNote,
   filterNotes,
+  searchNotes,
   sortNotes,
   updateNote,
   validateNoteDraft,
@@ -70,4 +71,46 @@ test("笔记按用户填写的日期从新到旧排序", () => {
     middleNote.title,
     oldNote.title,
   ]);
+});
+
+test("搜索笔记按标题与正文进行不区分大小写的匹配", () => {
+  const notes = [
+    createNote({ ...validDraft, title: "项目复盘", content: "整理本季度总结", date: "2026-09-01" }),
+    createNote({
+      ...validDraft,
+      title: "Shopping List",
+      content: "buy milk and eggs",
+      category: "life",
+      date: "2026-09-02",
+    }),
+    { kind: "todo", text: "待办不应被搜索到" },
+  ];
+  assert.equal(searchNotes(notes, "").length, 2);
+  assert.equal(searchNotes(notes, "   ").length, 2);
+  assert.deepEqual(searchNotes(notes, "复盘").map((item) => item.title), ["项目复盘"]);
+  assert.deepEqual(searchNotes(notes, "总结").map((item) => item.title), ["项目复盘"]);
+  assert.deepEqual(searchNotes(notes, "shopping").map((item) => item.title), [
+    "Shopping List",
+  ]);
+  assert.equal(searchNotes(notes, "BUY").length, 1);
+  assert.equal(searchNotes(notes, "不存在的关键词").length, 0);
+  assert.equal(searchNotes(notes, "待办").length, 0);
+});
+
+test("校验与筛选支持自定义分类列表", () => {
+  const keys = ["work", "insight"];
+  assert.equal(validateNoteDraft({ ...validDraft, category: "work" }, keys).valid, true);
+  assert.equal(validateNoteDraft({ ...validDraft, category: "life" }, keys).valid, false);
+
+  const now = new Date("2026-09-08T10:00:00.000Z");
+  const workNote = createNote({ ...validDraft, title: "A", category: "work" }, now, keys);
+  assert.equal(workNote.category, "work");
+  const updated = updateNote(workNote, { ...validDraft, category: "insight" }, now, keys);
+  assert.equal(updated.category, "insight");
+
+  const lifeNote = createNote({ ...validDraft, title: "B", category: "life", date: "2026-09-02" });
+  const items = [workNote, lifeNote];
+  assert.deepEqual(filterNotes(items, "work", keys).map((item) => item.title), ["A"]);
+  assert.equal(filterNotes(items, "all", keys).length, 2);
+  assert.equal(filterNotes(items, "life", keys).length, 2);
 });

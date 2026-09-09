@@ -97,7 +97,12 @@ test("第二版我的创作、设置与笔记日期设置", async (t) => {
 
   await page.locator('[data-action="mine-section"][data-section="settings"]').click();
   await page.locator('[data-testid="settings-view"]').waitFor();
+  assert.match(await page.locator('[data-testid="settings-view"]').textContent(), /第三版/);
   assert.match(await page.locator('[data-testid="settings-view"]').textContent(), /第二版/);
+  assert.match(
+    await page.locator('[data-testid="settings-view"]').textContent(),
+    /护眼模式|自定义分类/,
+  );
 
   await page.locator('[data-action="note-date-mode"][data-mode="manual"]').click();
   await page.locator('[data-view="notes"]').click();

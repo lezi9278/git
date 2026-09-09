@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { CATEGORY_LABEL_MAX_LENGTH } from "../src/core/categories.js";
 import {
   clearItems,
   createMemoryBackend,
@@ -77,6 +78,7 @@ test("设置使用默认值并可读写", () => {
   assert.deepEqual(readSettings(backend), DEFAULT_SETTINGS);
   writeSettings(backend, { noteDateMode: "manual", todoGraceMinutes: 10 });
   assert.deepEqual(readSettings(backend), {
+    ...DEFAULT_SETTINGS,
     noteDateMode: "manual",
     todoGraceMinutes: 10,
   });
@@ -90,4 +92,48 @@ test("无效设置会回退到默认值并限制范围", () => {
   const settings = readSettings(backend);
   assert.equal(settings.noteDateMode, "auto");
   assert.equal(settings.todoGraceMinutes, 1440);
+});
+
+test("主题设置默认为亮色，仅接受护眼模式取值", () => {
+  const emptyBackend = createMemoryBackend();
+  assert.equal(readSettings(emptyBackend).theme, "light");
+
+  const eyeBackend = createMemoryBackend(JSON.stringify({ theme: "eye" }));
+  assert.equal(readSettings(eyeBackend).theme, "eye");
+
+  const invalidBackend = createMemoryBackend(JSON.stringify({ theme: "dark" }));
+  assert.equal(readSettings(invalidBackend).theme, "light");
+});
+
+test("分类设置缺失或非法时回退到默认分类", () => {
+  const emptyBackend = createMemoryBackend();
+  assert.deepEqual(readSettings(emptyBackend).noteCategories, DEFAULT_SETTINGS.noteCategories);
+
+  const invalidBackend = createMemoryBackend(
+    JSON.stringify({
+      noteCategories: [
+        { key: "", label: " " },
+        { key: "x", label: "" },
+        "bad",
+        null,
+        { key: "long", label: "一".repeat(CATEGORY_LABEL_MAX_LENGTH + 1) },
+      ],
+    }),
+  );
+  assert.deepEqual(readSettings(invalidBackend).noteCategories, DEFAULT_SETTINGS.noteCategories);
+});
+
+test("合法的自定义分类会被保留", () => {
+  const backend = createMemoryBackend(
+    JSON.stringify({
+      noteCategories: [
+        { key: "insight", label: "感悟" },
+        { key: "cat-1", label: "工作" },
+      ],
+    }),
+  );
+  assert.deepEqual(readSettings(backend).noteCategories, [
+    { key: "insight", label: "感悟" },
+    { key: "cat-1", label: "工作" },
+  ]);
 });

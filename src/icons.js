@@ -9,6 +9,14 @@ const ICON_NODES = {
   ],
   check: [["path", { d: "M20 6 9 17l-5-5" }]],
   chevronDown: [["path", { d: "m6 9 6 6 6-6" }]],
+  search: [
+    ["circle", { cx: "11", cy: "11", r: "8" }],
+    ["path", { d: "m21 21-4.3-4.3" }],
+  ],
+  close: [
+    ["path", { d: "M18 6 6 18" }],
+    ["path", { d: "m6 6 12 12" }],
+  ],
   fileText: [
     ["path", { d: "M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" }],
     ["path", { d: "M14 2v5a1 1 0 0 0 1 1h5" }],

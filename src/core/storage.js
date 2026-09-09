@@ -1,9 +1,13 @@
+import { DEFAULT_NOTE_CATEGORIES, normalizeCategories } from "./categories.js";
+
 export const STORAGE_KEY = "local-notes:items:v1";
 export const SETTINGS_KEY = "local-notes:settings:v1";
 
 export const DEFAULT_SETTINGS = Object.freeze({
   noteDateMode: "auto",
   todoGraceMinutes: 5,
+  theme: "light",
+  noteCategories: DEFAULT_NOTE_CATEGORIES,
 });
 
 export function migrateItems(items) {
@@ -101,6 +105,7 @@ export function readSettings(storage) {
     }
     const parsed = JSON.parse(raw);
     const noteDateMode = parsed.noteDateMode === "manual" ? "manual" : "auto";
+    const theme = parsed.theme === "eye" ? "eye" : "light";
     const todoGraceMinutes = Number.isFinite(Number(parsed.todoGraceMinutes))
       ? Math.min(1440, Math.max(0, Math.round(Number(parsed.todoGraceMinutes))))
       : DEFAULT_SETTINGS.todoGraceMinutes;
@@ -109,6 +114,8 @@ export function readSettings(storage) {
       todoGraceMinutes: Number.isInteger(todoGraceMinutes)
         ? todoGraceMinutes
         : DEFAULT_SETTINGS.todoGraceMinutes,
+      theme,
+      noteCategories: normalizeCategories(parsed.noteCategories),
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

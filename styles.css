@@ -12,9 +12,30 @@
   --yellow-soft: #fff4ad;
   --danger: #d33122;
   --danger-soft: #fff0ee;
+  --surface-translucent: rgba(255, 255, 255, 0.95);
+  --row-active: #fafafa;
+  --placeholder: #d4d4d4;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI",
     "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
   letter-spacing: 0;
+}
+
+body[data-theme="eye"] {
+  background: #d7e2cb;
+  --white: #eef4e8;
+  --paper: #e3ecdb;
+  --ink: #1c261b;
+  --ink-soft: #2f3a2c;
+  --gray: #77846f;
+  --gray-light: #a3b098;
+  --line: #dfe8d6;
+  --line-strong: #c3d0b5;
+  --yellow-soft: #f4f4c0;
+  --danger: #c2402f;
+  --danger-soft: #f2ece0;
+  --surface-translucent: rgba(238, 244, 232, 0.95);
+  --row-active: #e9f0e0;
+  --placeholder: #b7c4aa;
 }
 
 * {
@@ -141,6 +162,49 @@ textarea:focus-visible {
   }
 }
 
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 6px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--paper);
+  animation: popover-in 160ms ease both;
+}
+
+.search-bar input {
+  flex: 1;
+  min-width: 0;
+  min-height: 26px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.search-bar input:focus {
+  outline: 0;
+}
+
+.search-clear {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--gray);
+  transition: color 140ms ease;
+}
+
+.search-clear:hover {
+  color: var(--ink);
+}
+
 .menu-item {
   display: flex;
   align-items: center;
@@ -225,7 +289,7 @@ textarea:focus-visible {
 }
 
 .list-row:active {
-  background: #fafafa;
+  background: var(--row-active);
 }
 
 .row-main {
@@ -407,7 +471,7 @@ textarea:focus-visible {
   align-items: center;
   padding: 8px 20px 10px;
   border-top: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--surface-translucent);
 }
 
 .tab-item {
@@ -465,7 +529,7 @@ textarea:focus-visible {
   align-items: center;
   min-height: 58px;
   padding: 8px 18px;
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--surface-translucent);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--line);
 }
@@ -520,7 +584,7 @@ textarea:focus-visible {
 
 .title-input::placeholder,
 textarea::placeholder {
-  color: #d4d4d4;
+  color: var(--placeholder);
 }
 
 .title-input:focus,
@@ -870,6 +934,53 @@ textarea:focus {
   font-size: 11px;
 }
 
+.category-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.category-row-name {
+  font-size: 14px;
+}
+
+.category-row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.category-edit-form {
+  justify-content: flex-end;
+}
+
+.category-edit-form,
+.category-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.category-edit-form input,
+.category-add input {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--white);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.category-add {
+  padding-top: 12px;
+}
+
 .button {
   min-height: 32px;
   padding: 0 12px;
@@ -895,6 +1006,13 @@ textarea:focus {
 .small-button {
   min-height: 28px;
   border-radius: 999px;
+}
+
+.version-subtitle {
+  margin: 18px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .version-list {

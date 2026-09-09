@@ -1,4 +1,4 @@
-import { CATEGORY_KEYS, isCategory } from "./categories.js";
+import { CATEGORY_KEYS } from "./categories.js";
 import { isValidDateKey } from "./time.js";
 
 export function makeId(prefix) {
@@ -9,7 +9,7 @@ export function makeId(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${randomPart}`;
 }
 
-export function validateNoteDraft(draft) {
+export function validateNoteDraft(draft, categoryKeys = CATEGORY_KEYS) {
   const title = typeof draft.title === "string" ? draft.title.trim() : "";
   const content = typeof draft.content === "string" ? draft.content.trim() : "";
   const category = draft.category;
@@ -21,7 +21,7 @@ export function validateNoteDraft(draft) {
   if (!content) {
     errors.push("内容不能为空");
   }
-  if (!isCategory(category)) {
+  if (!categoryKeys.includes(category)) {
     errors.push("请选择有效分类");
   }
   if (!isValidDateKey(date)) {
@@ -30,8 +30,8 @@ export function validateNoteDraft(draft) {
   return { valid: errors.length === 0, errors };
 }
 
-export function createNote(draft, now = new Date()) {
-  const result = validateNoteDraft(draft);
+export function createNote(draft, now = new Date(), categoryKeys = CATEGORY_KEYS) {
+  const result = validateNoteDraft(draft, categoryKeys);
   if (!result.valid) {
     const error = new Error(`笔记信息不完整: ${result.errors.join("；")}`);
     error.validation = result.errors;
@@ -50,8 +50,8 @@ export function createNote(draft, now = new Date()) {
   };
 }
 
-export function updateNote(note, draft, now = new Date()) {
-  const result = validateNoteDraft(draft);
+export function updateNote(note, draft, now = new Date(), categoryKeys = CATEGORY_KEYS) {
+  const result = validateNoteDraft(draft, categoryKeys);
   if (!result.valid) {
     const error = new Error(`笔记信息不完整: ${result.errors.join("；")}`);
     error.validation = result.errors;
@@ -68,15 +68,33 @@ export function updateNote(note, draft, now = new Date()) {
   };
 }
 
-export function filterNotes(items, category = "all") {
+export function filterNotes(items, category = "all", categoryKeys = CATEGORY_KEYS) {
   const notes = items.filter((item) => item.kind === "note");
   if (category === "all") {
     return notes;
   }
-  if (!CATEGORY_KEYS.includes(category)) {
+  if (!categoryKeys.includes(category)) {
     return notes;
   }
   return notes.filter((note) => note.category === category);
+}
+
+export function searchNotes(items, query = "") {
+  const keyword = String(query ?? "").trim().toLowerCase();
+  return items.filter((item) => {
+    if (item?.kind !== "note") {
+      return false;
+    }
+    if (!keyword) {
+      return true;
+    }
+    const title = typeof item.title === "string" ? item.title : "";
+    const content = typeof item.content === "string" ? item.content : "";
+    return (
+      title.toLowerCase().includes(keyword) ||
+      content.toLowerCase().includes(keyword)
+    );
+  });
 }
 
 export function sortNotes(items) {
