@@ -1,14 +1,44 @@
 {
   "name": "local-notes",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "在本地浏览器中运行的个人笔记与待办工具",
+  "main": "electron/main.cjs",
+  "description": "在本地运行的个人笔记与待办工具，支持浏览器访问与桌面应用",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test \"tests/*.test.mjs\""
+    "test": "node --test \"tests/*.test.mjs\"",
+    "app": "electron .",
+    "app:build": "electron-builder --win"
   },
   "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
     "playwright": "1.62.1"
+  },
+  "build": {
+    "appId": "com.lezi9278.local-notes",
+    "productName": "本地笔记与待办",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "index.html",
+      "styles.css",
+      "src/**/*",
+      "electron/**/*"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "deleteAppDataOnUninstall": false
+    }
   }
 }
